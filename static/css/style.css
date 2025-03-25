@@ -2,23 +2,101 @@
  * Main Stylesheet for EDR System
  */
 
+:root {
+    --primary-color: #3b71ca;
+    --secondary-color: #6c757d;
+    --success-color: #14a44d;
+    --danger-color: #dc4c64;
+    --warning-color: #e4a11b;
+    --info-color: #54b4d3;
+    --card-box-shadow: 0 0.25rem 1rem rgba(0, 0, 0, 0.15);
+    --transition-speed: 0.3s;
+}
+
+[data-bs-theme="dark"] {
+    --card-box-shadow: 0 0.25rem 1rem rgba(0, 0, 0, 0.5);
+}
+
+/* Layout and Global Styles */
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
+
+.app-container {
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+}
+
+.content-container {
+    flex: 1;
+    padding: 1rem;
+}
+
+/* Navbar */
+.navbar {
+    background-color: var(--primary-color);
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+    transition: background-color var(--transition-speed);
+}
+
+.navbar-brand {
+    font-weight: 600;
+}
+
+.navbar-dark .navbar-nav .nav-link.active {
+    background-color: rgba(255, 255, 255, 0.15);
+    border-radius: 0.375rem;
+}
+
+.navbar-dark .navbar-nav .nav-link {
+    padding: 0.5rem 1rem;
+    border-radius: 0.375rem;
+    transition: all var(--transition-speed);
+}
+
+.navbar-dark .navbar-nav .nav-link:hover {
+    background-color: rgba(255, 255, 255, 0.1);
+}
+
+.theme-toggle-btn {
+    background-color: rgba(255, 255, 255, 0.15);
+    color: white;
+    border: none;
+    border-radius: 50%;
+    width: 36px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all var(--transition-speed);
+}
+
+.theme-toggle-btn:hover {
+    background-color: rgba(255, 255, 255, 0.25);
+    transform: rotate(10deg);
+}
+
 /* Dashboard */
 .dashboard-stats {
     display: flex;
     flex-wrap: wrap;
     margin-bottom: 2rem;
+    gap: 1rem;
 }
 
 .stat-card {
     flex: 1;
     min-width: 200px;
-    background-color: #fff;
-    border-radius: 0.375rem;
-    box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075);
-    margin: 0.5rem;
+    border-radius: 0.5rem;
+    box-shadow: var(--card-box-shadow);
     padding: 1.5rem;
     text-align: center;
-    transition: transform 0.3s;
+    transition: all var(--transition-speed);
+    border: none;
 }
 
 .stat-card:hover {
@@ -26,8 +104,9 @@
 }
 
 .stat-card i {
-    font-size: 2rem;
+    font-size: 2.5rem;
     margin-bottom: 1rem;
+    opacity: 0.8;
 }
 
 .stat-card .stat-value {
@@ -37,74 +116,134 @@
 }
 
 .stat-card .stat-label {
-    color: #6c757d;
+    opacity: 0.8;
     font-size: 0.875rem;
     text-transform: uppercase;
+    letter-spacing: 0.5px;
 }
 
+/* Cards */
 .card {
+    border: none;
+    border-radius: 0.5rem;
+    box-shadow: var(--card-box-shadow);
     margin-bottom: 1.5rem;
+    transition: box-shadow var(--transition-speed);
+}
+
+.card:hover {
+    box-shadow: 0 0.5rem 1.5rem rgba(0, 0, 0, 0.2);
 }
 
 .card-header {
-    background-color: rgba(0, 0, 0, 0.03);
-    border-bottom: 1px solid rgba(0, 0, 0, 0.125);
+    border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+    padding: 1rem 1.25rem;
+    font-weight: 600;
+    border-top-left-radius: 0.5rem !important;
+    border-top-right-radius: 0.5rem !important;
+}
+
+.card-body {
+    padding: 1.5rem;
 }
 
 /* Alert status badges */
-.status-new {
-    background-color: #ffc107;
-    color: #212529;
-}
-
-.status-in-review {
-    background-color: #0dcaf0;
-    color: #212529;
-}
-
-.status-in-progress {
-    background-color: #6f42c1;
+.status-new, .bg-warning {
+    background-color: var(--warning-color) !important;
     color: #fff;
 }
 
-.status-resolved {
-    background-color: #198754;
+.status-in-review, .bg-info {
+    background-color: var(--info-color) !important;
     color: #fff;
 }
 
-.status-false-positive {
-    background-color: #6c757d;
+.status-in-progress, .bg-primary {
+    background-color: var(--primary-color) !important;
     color: #fff;
 }
 
-/* Sidebar and navigation */
-.navbar {
-    background-color: #212529;
-    box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075);
+.status-resolved, .bg-success {
+    background-color: var(--success-color) !important;
+    color: #fff;
 }
 
-.navbar-brand {
-    font-weight: 700;
+.status-false-positive, .bg-secondary {
+    background-color: var(--secondary-color) !important;
+    color: #fff;
 }
 
-.navbar-dark .navbar-nav .nav-link.active {
-    background-color: rgba(255, 255, 255, 0.1);
-    border-radius: 0.25rem;
+/* Badge styling */
+.badge {
+    padding: 0.5em 0.75em;
+    font-weight: 500;
+    border-radius: 0.375rem;
 }
 
-/* Footer */
-footer {
-    background-color: #f8f9fa;
-    border-top: 1px solid #dee2e6;
-    padding: 1rem 0;
-    margin-top: 2rem;
+/* Buttons */
+.btn {
+    border-radius: 0.375rem;
+    padding: 0.5rem 1rem;
+    font-weight: 500;
+    transition: all var(--transition-speed);
+}
+
+.btn-primary {
+    background-color: var(--primary-color);
+    border-color: var(--primary-color);
+}
+
+.btn-success {
+    background-color: var(--success-color);
+    border-color: var(--success-color);
+}
+
+.btn-warning {
+    background-color: var(--warning-color);
+    border-color: var(--warning-color);
+}
+
+.btn-danger {
+    background-color: var(--danger-color);
+    border-color: var(--danger-color);
+}
+
+.btn-sm {
+    padding: 0.25rem 0.75rem;
     font-size: 0.875rem;
-    color: #6c757d;
 }
 
-/* Custom fonts */
-body {
-    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+/* Tables */
+.table {
+    border-radius: 0.5rem;
+    overflow: hidden;
+}
+
+.table th {
+    font-weight: 600;
+    border-top: none;
+}
+
+/* Animations */
+.fade-in {
+    animation: fadeIn 0.5s;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+/* Mobile responsiveness */
+@media (max-width: 768px) {
+    .stat-card {
+        min-width: 100%;
+        margin: 0.5rem 0;
+    }
+    
+    .navbar-brand {
+        font-size: 1.1rem;
+    }
 }
 
 /* Utilities */
@@ -120,20 +259,98 @@ body {
     text-overflow: ellipsis;
 }
 
-/* Mobile responsiveness */
-@media (max-width: 768px) {
-    .stat-card {
-        min-width: 100%;
-        margin: 0.5rem 0;
-    }
+/* Footer */
+footer {
+    background-color: #f8f9fa;
+    border-top: 1px solid #dee2e6;
+    padding: 1rem 0;
+    margin-top: 2rem;
+    font-size: 0.875rem;
+    color: #6c757d;
 }
 
-/* Animations */
-.fade-in {
-    animation: fadeIn 0.5s;
+/* Additional UI enhancements */
+.icon-bg {
+    position: relative;
+    padding: 10px;
 }
 
-@keyframes fadeIn {
-    from { opacity: 0; }
-    to { opacity: 1; }
+/* Smooth transitions on theme change */
+*, *:before, *:after {
+    transition: background-color 0.3s ease, border-color 0.3s ease, color 0.3s ease;
+}
+
+/* Make faster transitions for specific elements */
+.btn, .nav-link, .card {
+    transition: all 0.2s ease;
+}
+
+/* Counter animation */
+@keyframes countUp {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.display-4 {
+    animation: countUp 0.5s ease-out forwards;
+}
+
+/* Card hover effects */
+.card {
+    overflow: hidden;
+}
+
+.card.bg-primary:hover, 
+.card.bg-warning:hover,
+.card.bg-success:hover {
+    transform: translateY(-5px);
+}
+
+/* Table enhancements */
+.table-hover tbody tr:hover {
+    background-color: rgba(var(--bs-primary-rgb), 0.05);
+}
+
+.table th {
+    text-transform: uppercase;
+    font-size: 0.8rem;
+    letter-spacing: 0.5px;
+}
+
+/* Dark mode enhancements */
+[data-bs-theme="dark"] .table-hover tbody tr:hover {
+    background-color: rgba(255, 255, 255, 0.05);
+}
+
+[data-bs-theme="dark"] .card {
+    background-color: rgba(255, 255, 255, 0.05);
+}
+
+[data-bs-theme="dark"] .bg-light {
+    background-color: rgba(255, 255, 255, 0.05) !important;
+}
+
+/* Improve spacing */
+.card-header {
+    padding-top: 0.75rem;
+    padding-bottom: 0.75rem;
+}
+
+/* List group enhancements */
+.list-group-item {
+    padding: 0.5rem 1rem;
+}
+
+/* Utility classes */
+.fw-semibold {
+    font-weight: 600;
+}
+
+/* Typography improvements */
+h4, h5, h6 {
+    font-weight: 600;
+}
+
+.lead {
+    font-weight: 400;
 } 
