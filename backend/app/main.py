@@ -3,6 +3,7 @@ import json
 import logging
 from pathlib import Path
 from flask import Flask, request, jsonify, render_template, redirect, url_for
+from flask_cors import CORS
 from dotenv import load_dotenv
 from app.elastalert import ElastAlertClient
 
@@ -20,6 +21,9 @@ load_dotenv()
 app = Flask(__name__, 
             template_folder='../templates',
             static_folder='../static')
+
+# Enable CORS
+CORS(app, resources={r"/api/*": {"origins": "*"}})
 
 # Configuration
 config = {

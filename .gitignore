@@ -10,3 +10,7 @@ __pycache__
 
 elastalert
 cacert.pem
+
+node_modules
+
+.next
