@@ -3,6 +3,7 @@ import {
   IconAlertTriangle,
   IconRuler,
   IconServer,
+  IconShield,
 } from '@tabler/icons-react'
 import { Command } from 'lucide-react'
 import { type SidebarData } from '../types'
@@ -16,7 +17,7 @@ export const sidebarData: SidebarData = {
   teams: [
     {
       name: 'HUST EDR',
-      logo: Command,
+      logo: IconShield,
       plan: 'Security Dashboard',
     },
   ],
