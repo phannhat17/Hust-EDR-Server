@@ -279,7 +279,7 @@ function AlertsPage() {
                   {alerts.map((alert: Alert) => (
                     <TableRow 
                       key={alert.id} 
-                      className="cursor-pointer hover:bg-slate-50"
+                      className="cursor-pointer hover:bg-muted/50"
                       onClick={() => showAlertDetails(alert)}
                     >
                       <TableCell className="font-medium">{alert.rule_name}</TableCell>
@@ -311,7 +311,7 @@ function AlertsPage() {
 
         {/* Alert Details Dialog */}
         <Dialog open={detailsOpen} onOpenChange={setDetailsOpen}>
-          <DialogContent className="sm:max-w-3xl">
+          <DialogContent className="sm:max-w-3xl max-h-[90vh] overflow-hidden">
             <DialogHeader>
               <DialogTitle>Alert Details</DialogTitle>
               <DialogDescription>
@@ -321,13 +321,13 @@ function AlertsPage() {
 
             {selectedAlert && (
               <Tabs defaultValue="details" className="w-full">
-                <TabsList className="grid grid-cols-3 w-full">
+                <TabsList className="grid grid-cols-3 w-full mb-2">
                   <TabsTrigger value="details">Details</TabsTrigger>
                   <TabsTrigger value="raw">Raw Data</TabsTrigger>
                   <TabsTrigger value="timeline">Timeline</TabsTrigger>
                 </TabsList>
                 
-                <TabsContent value="details" className="space-y-4 mt-4">
+                <TabsContent value="details" className="space-y-4 mt-4 overflow-auto max-h-[60vh]">
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <h3 className="text-sm font-medium text-muted-foreground mb-1">Rule Name</h3>
@@ -398,7 +398,7 @@ function AlertsPage() {
                   </div>
                 </TabsContent>
                 
-                <TabsContent value="raw" className="mt-4">
+                <TabsContent value="raw" className="mt-4 overflow-auto max-h-[60vh]">
                   <div className="flex justify-end mb-2">
                     <Button 
                       variant="outline" 
@@ -410,9 +410,9 @@ function AlertsPage() {
                       Copy
                     </Button>
                   </div>
-                  <div className="border rounded-md">
-                    <ScrollArea className="h-[400px] w-full">
-                      <pre className="text-xs p-4 bg-slate-50 rounded-md overflow-hidden whitespace-pre-wrap break-all">
+                  <div className="border rounded-md border-border">
+                    <ScrollArea className="h-[350px] w-full">
+                      <pre className="text-xs p-4 bg-muted rounded-md overflow-hidden whitespace-pre-wrap break-all text-foreground">
                         {(() => {
                           try {
                             // Try to get raw_data first, if that doesn't exist or is empty, show the whole alert
@@ -427,10 +427,10 @@ function AlertsPage() {
                   </div>
                 </TabsContent>
                 
-                <TabsContent value="timeline" className="mt-4">
-                  <div className="relative pl-6 border-l border-slate-200 space-y-4 py-2">
+                <TabsContent value="timeline" className="mt-4 overflow-auto max-h-[60vh]">
+                  <div className="relative pl-6 border-l border-border space-y-4 py-2">
                     <div>
-                      <div className="absolute -left-1.5 mt-1.5 h-3 w-3 rounded-full border border-white bg-slate-200"></div>
+                      <div className="absolute -left-1.5 mt-1.5 h-3 w-3 rounded-full border border-background bg-muted"></div>
                       <h3 className="text-sm font-medium">Alert Created</h3>
                       <time className="text-xs text-muted-foreground">
                         {getBestTimestamp(selectedAlert)}
@@ -439,7 +439,7 @@ function AlertsPage() {
                     
                     {selectedAlert.status !== 'new' && (
                       <div>
-                        <div className="absolute -left-1.5 mt-1.5 h-3 w-3 rounded-full border border-white bg-slate-200"></div>
+                        <div className="absolute -left-1.5 mt-1.5 h-3 w-3 rounded-full border border-background bg-muted"></div>
                         <h3 className="text-sm font-medium">Status Updated</h3>
                         <time className="text-xs text-muted-foreground">
                           {/* This would ideally come from a timeline field in the data */}
