@@ -6,6 +6,12 @@ export interface Alert {
   status: 'new' | 'in_progress' | 'resolved' | 'false_positive';
   notes?: string;
   assigned_to?: string;
+  description?: string;
+  source?: string;
+  affected_host?: string;
+  severity?: 'low' | 'medium' | 'high';
+  raw_data?: any;
+  alert_time?: string;
 }
 
 export interface Rule {
@@ -28,6 +34,7 @@ export interface Rule {
   include?: string[];
   description?: string;
   priority?: number;
+  is_enabled?: boolean;
   [key: string]: any;
 }
 
@@ -60,4 +67,5 @@ export interface Agent {
   status: 'active' | 'inactive';
   last_seen: string;
   registered_at: string;
+  // Add any other fields that might be in the API response
 } 
