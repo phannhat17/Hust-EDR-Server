@@ -1,4 +1,3 @@
-import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
 import { Link } from '@tanstack/react-router'
@@ -27,21 +26,12 @@ import { Search } from '@/components/search'
 import { ThemeSwitch } from '@/components/theme-switch'
 
 export default function Agents() {
-  const [searchQuery, setSearchQuery] = useState('');
-
+  // No longer using searchQuery since it's not connected to UI
   const { data: agents = [], isLoading } = useQuery({
     queryKey: ['agents'],
     queryFn: () => agentsApi.getAgents(),
     refetchInterval: 60000, // Refresh every minute
   });
-
-  // Filter agents based on search query
-  const filteredAgents = searchQuery.trim() === '' 
-    ? agents 
-    : agents.filter((agent: Agent) => 
-        agent.hostname.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        agent.ip_address.toLowerCase().includes(searchQuery.toLowerCase())
-      );
 
   return (
     <>
@@ -49,7 +39,7 @@ export default function Agents() {
       <Header>
         <TopNav links={topNav} />
         <div className='ml-auto flex items-center space-x-4'>
-          <Search />
+          <Search placeholder="Search agents..." />
           <ThemeSwitch />
         </div>
       </Header>
@@ -71,7 +61,7 @@ export default function Agents() {
           <CardContent>
             {isLoading ? (
               <div className="flex justify-center py-8">Loading agents...</div>
-            ) : filteredAgents.length === 0 ? (
+            ) : agents.length === 0 ? (
               <div className="flex justify-center py-8 flex-col items-center">
                 <p className="mb-4">No agents found</p>
                 <Button asChild>
@@ -92,7 +82,7 @@ export default function Agents() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {filteredAgents.map((agent: Agent) => (
+                  {agents.map((agent: Agent) => (
                     <TableRow key={agent.id}>
                       <TableCell className="font-medium">{agent.hostname}</TableCell>
                       <TableCell>{agent.ip_address}</TableCell>
