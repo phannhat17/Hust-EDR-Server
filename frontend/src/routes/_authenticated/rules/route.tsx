@@ -40,7 +40,7 @@ import { Main } from '@/components/layout/main'
 import { TopNav } from '@/components/layout/top-nav'
 import { Search } from '@/components/search'
 import { ThemeSwitch } from '@/components/theme-switch'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { z } from 'zod'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -439,6 +439,98 @@ function RuleForm({ rule, onSubmit, onCancel }: {
   );
 }
 
+// YamlEditor component for direct YAML editing
+function YamlEditor({ 
+  rule, 
+  onSubmit, 
+  onCancel 
+}: { 
+  rule?: Rule; 
+  onSubmit: (data: any) => void;
+  onCancel: () => void;
+}) {
+  const [yamlContent, setYamlContent] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  // Load the rule YAML when component mounts
+  useEffect(() => {
+    const fetchRuleYaml = async () => {
+      if (!rule || !rule.filename) return;
+      
+      setLoading(true);
+      setError(null);
+      
+      try {
+        // Get the raw YAML content
+        const response = await rulesApi.getRuleYaml(rule.filename);
+        setYamlContent(response.content || '');
+      } catch (err) {
+        console.error('Error fetching rule YAML:', err);
+        setError('Failed to load rule YAML content');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchRuleYaml();
+  }, [rule]);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    
+    try {
+      // Submit the raw YAML content
+      await onSubmit({ 
+        filename: rule?.filename,
+        yamlContent 
+      });
+    } catch (err) {
+      console.error('Error saving YAML:', err);
+      setError('Failed to save rule YAML content');
+    }
+  };
+
+  if (loading) {
+    return <div className="p-4 text-center">Loading rule content...</div>;
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-4">
+      {error && (
+        <div className="bg-red-50 p-4 rounded border border-red-200 text-red-800">
+          {error}
+        </div>
+      )}
+      
+      <div className="space-y-2">
+        <label className="text-sm font-medium">
+          Edit YAML Content
+          <span className="text-xs ml-2 text-gray-500">
+            (Make sure to follow proper YAML syntax)
+          </span>
+        </label>
+        <Textarea
+          value={yamlContent}
+          onChange={(e) => setYamlContent(e.target.value)}
+          className="font-mono text-sm min-h-[400px] resize-y"
+          placeholder="# Loading rule content..."
+        />
+      </div>
+      
+      <DialogFooter className="pt-2 border-t">
+        <Button type="button" variant="outline" onClick={onCancel}>
+          Cancel
+        </Button>
+        <Button type="submit">
+          Save Changes
+        </Button>
+      </DialogFooter>
+    </form>
+  );
+}
+
 export const Route = createFileRoute('/_authenticated/rules')({
   component: RulesPage
 })
@@ -517,24 +609,45 @@ function RulesPage() {
     restartMutation.mutate()
   }
 
-  const handleEdit = (rule: Rule) => {
-    setSelectedRule(rule)
-  }
-
-  const handleEditSubmit = (data: any) => {
-    if (selectedRule) {
-      editMutation.mutate({ 
-        filename: selectedRule.filename, 
-        ruleData: data 
-      })
-      setSelectedRule(null)
+  const handleYamlEditSubmit = async (data: { filename?: string, yamlContent: string }) => {
+    try {
+      if (data.filename) {
+        await rulesApi.updateRuleYaml(data.filename, data.yamlContent);
+        queryClient.invalidateQueries({ queryKey: ['rules'] });
+        toast({
+          title: 'Rule updated',
+          description: 'The rule YAML has been updated successfully.',
+        });
+        setSelectedRule(null);
+      }
+    } catch (error) {
+      console.error("Error updating rule YAML:", error);
+      toast({
+        title: 'Error',
+        description: 'Failed to update rule YAML. Please check your syntax.',
+        variant: 'destructive'
+      });
     }
-  }
+  };
 
-  const handleCreateSubmit = (data: any) => {
-    createMutation.mutate(data)
-    setIsCreateDialogOpen(false)
-  }
+  const handleCreateSubmit = async (data: { yamlContent: string }) => {
+    try {
+      await rulesApi.createRuleFromYaml(data.yamlContent);
+      queryClient.invalidateQueries({ queryKey: ['rules'] });
+      toast({
+        title: 'Rule created',
+        description: 'The rule has been created successfully.',
+      });
+      setIsCreateDialogOpen(false);
+    } catch (error) {
+      console.error("Error creating rule from YAML:", error);
+      toast({
+        title: 'Error',
+        description: 'Failed to create rule. Please check your YAML syntax.',
+        variant: 'destructive'
+      });
+    }
+  };
 
   // Generate topNav with proper active states based on current URL params
   const getTopNav = () => {
@@ -625,7 +738,7 @@ function RulesPage() {
                           <Button 
                             variant="outline" 
                             size="icon"
-                            onClick={() => handleEdit(rule)}
+                            onClick={() => setSelectedRule(rule)}
                           >
                             <Edit className="h-4 w-4" />
                           </Button>
@@ -665,33 +778,36 @@ function RulesPage() {
 
       {/* Edit Rule Dialog */}
       <Dialog open={!!selectedRule} onOpenChange={(open) => !open && setSelectedRule(null)}>
-        <DialogContent className="sm:max-w-2xl">
+        <DialogContent className="sm:max-w-3xl">
           <DialogHeader>
             <DialogTitle>Edit Rule: {selectedRule?.name}</DialogTitle>
             <DialogDescription>
-              Modify the rule configuration
+              Edit rule YAML configuration
             </DialogDescription>
           </DialogHeader>
+          
           {selectedRule && (
-            <RuleForm 
-              rule={selectedRule} 
-              onSubmit={handleEditSubmit}
-              onCancel={() => setSelectedRule(null)}
-            />
+            <div className="relative">
+              <YamlEditor 
+                rule={selectedRule} 
+                onSubmit={handleYamlEditSubmit}
+                onCancel={() => setSelectedRule(null)}
+              />
+            </div>
           )}
         </DialogContent>
       </Dialog>
 
       {/* Create Rule Dialog */}
       <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
-        <DialogContent className="sm:max-w-2xl">
+        <DialogContent className="sm:max-w-3xl">
           <DialogHeader>
             <DialogTitle>Create New Rule</DialogTitle>
             <DialogDescription>
               Create a new ElastAlert detection rule
             </DialogDescription>
           </DialogHeader>
-          <RuleForm 
+          <YamlEditor 
             onSubmit={handleCreateSubmit}
             onCancel={() => setIsCreateDialogOpen(false)}
           />

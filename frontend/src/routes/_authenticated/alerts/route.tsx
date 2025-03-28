@@ -269,6 +269,7 @@ function AlertsPage() {
               <Table>
                 <TableHeader>
                   <TableRow>
+                    <TableHead>ID</TableHead>
                     <TableHead>Rule Name</TableHead>
                     <TableHead>Created At</TableHead>
                     <TableHead>Status</TableHead>
@@ -282,6 +283,7 @@ function AlertsPage() {
                       className="cursor-pointer hover:bg-muted/50"
                       onClick={() => showAlertDetails(alert)}
                     >
+                      <TableCell className="font-mono text-xs">{alert.id}</TableCell>
                       <TableCell className="font-medium">{alert.rule_name}</TableCell>
                       <TableCell>{getBestTimestamp(alert)}</TableCell>
                       <TableCell>{getStatusBadge(alert.status)}</TableCell>

@@ -139,13 +139,28 @@ export const rulesApi = {
     return response.data
   },
   
+  getRuleYaml: async (filename: string) => {
+    const response = await api.get(`/api/rules/${filename}/yaml`)
+    return response.data
+  },
+  
   createRule: async (ruleData: any) => {
     const response = await api.post('/api/rules', ruleData)
     return response.data
   },
   
+  createRuleFromYaml: async (yamlContent: string) => {
+    const response = await api.post('/api/rules/yaml', { content: yamlContent })
+    return response.data
+  },
+  
   updateRule: async (filename: string, ruleData: any) => {
     const response = await api.put(`/api/rules/${filename}`, ruleData)
+    return response.data
+  },
+  
+  updateRuleYaml: async (filename: string, yamlContent: string) => {
+    const response = await api.put(`/api/rules/${filename}/yaml`, { content: yamlContent })
     return response.data
   },
   
