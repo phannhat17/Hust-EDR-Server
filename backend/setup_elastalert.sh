@@ -29,33 +29,9 @@ if [ ! -d "$RULES_DIR" ]; then
     mkdir -p "$RULES_DIR"
 fi
 
-# Get parameters
-read -p "Elasticsearch Host [$ELASTICSEARCH_HOST]: " input
-ELASTICSEARCH_HOST=${input:-$ELASTICSEARCH_HOST}
-
-read -p "Elasticsearch Port [$ELASTICSEARCH_PORT]: " input
-ELASTICSEARCH_PORT=${input:-$ELASTICSEARCH_PORT}
-
-read -p "Elasticsearch Username (leave empty if no auth) [$ELASTICSEARCH_USER]: " input
-ELASTICSEARCH_USER=${input:-$ELASTICSEARCH_USER}
-
-if [ -n "$ELASTICSEARCH_USER" ]; then
-    read -s -p "Elasticsearch Password: " input
-    echo
-    ELASTICSEARCH_PASSWORD=${input:-$ELASTICSEARCH_PASSWORD}
-fi
-
-read -p "Use SSL for Elasticsearch? (true/false) [$ELASTICSEARCH_USE_SSL]: " input
-ELASTICSEARCH_USE_SSL=${input:-$ELASTICSEARCH_USE_SSL}
-
 # Create required directories
 echo "Creating ElastAlert configuration directories..."
 mkdir -p elastalert/config
-mkdir -p elastalert/rules
-
-# Copy sample rules
-echo "Copying sample rules..."
-cp -r "$RULES_DIR"/* elastalert/rules/ 2>/dev/null || echo "No sample rules to copy."
 
 # Create ElastAlert config file
 echo "Creating ElastAlert configuration file..."
@@ -127,31 +103,16 @@ fi
 echo "Starting ElastAlert container..."
 DOCKER_CMD="docker run --net="host" -d --name elastalert --restart=always \
 -v $(pwd)/elastalert/config/config.yaml:/opt/elastalert/config.yaml \
--v $(pwd)/elastalert/rules:/opt/elastalert/rules \
+-v $(pwd)/$RULES_DIR:/opt/elastalert/rules \
 -v $(pwd)/cacert.pem:/opt/cacert.pem \
 jertel/elastalert2 --verbose"
 
 echo "Running command: $DOCKER_CMD"
 eval $DOCKER_CMD
 
-# echo
-# echo "ElastAlert 2 has been set up and started in Docker."
-# echo "Configuration: $(pwd)/elastalert/config/config.yaml"
-# echo "Rules directory: $(pwd)/elastalert/rules"
-# echo 
-# echo "To check the logs:"
-# echo "  docker logs elastalert"
-# echo
-# echo "To stop ElastAlert:"
-# echo "  docker stop elastalert"
-# echo
-# echo "To restart ElastAlert:"
-# echo "  docker restart elastalert"
-# echo
-# echo "Make sure to update the .env file of your EDR application with these settings:"
-# echo "  ELASTALERT_INDEX=elastalert_status"
-# echo "  ELASTALERT_RULES_DIR=$(pwd)/elastalert/rules"
-# echo "  ELASTALERT_DOCKER=true"
-# echo "  ELASTALERT_CONTAINER=elastalert"
-# echo
-# echo "Setup complete!" 
+echo
+echo "ElastAlert 2 has been set up and started in Docker."
+echo "Configuration: $(pwd)/elastalert/config/config.yaml"
+echo "Rules directory: $(pwd)/$RULES_DIR/"
+echo 
+echo "Setup complete!" 

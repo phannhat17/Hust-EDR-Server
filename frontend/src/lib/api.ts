@@ -40,7 +40,7 @@ const MOCK_ALERTS_BY_TIME_7D = Array.from({ length: 7 }, (_, i) => {
 const MOCK_AGENTS = [
   {
     id: '1',
-    hostname: 'web-server-01',
+    hostname: 'web-server-01-MOCK',
     ip_address: '192.168.1.101',
     os_info: 'Ubuntu 22.04 LTS',
     version: '1.2.0',
@@ -50,7 +50,7 @@ const MOCK_AGENTS = [
   },
   {
     id: '2',
-    hostname: 'db-server-01',
+    hostname: 'db-server-01-MOCK',
     ip_address: '192.168.1.102',
     os_info: 'CentOS 8',
     version: '1.2.0',
@@ -60,7 +60,7 @@ const MOCK_AGENTS = [
   },
   {
     id: '3',
-    hostname: 'app-server-01',
+    hostname: 'app-server-01-MOCK',
     ip_address: '192.168.1.103',
     os_info: 'Windows Server 2019',
     version: '1.1.5',

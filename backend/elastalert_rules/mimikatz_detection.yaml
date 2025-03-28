@@ -1,81 +1,43 @@
-name: Mimikatz Detection
+name: "Mimikatz File Found"
+
 type: any
-index: winlogbeat-*
 
-# This rule looks for known Mimikatz file hashes and Sysmon events related to Mimikatz usage
+index: "winlogbeat-*"
+
+run_every:
+  minutes: 1
+buffer_time:
+  minutes: 1
+
 filter:
-  - OR:
-      - AND:
-          - term:
-              event.code: 1    # Process creation
-          - query_string:
-              query: "process.name:*mimikatz* OR process.command_line:*mimikatz* OR process.command_line:*sekurlsa* OR process.command_line:*kerberos* OR process.command_line:*logonpasswords*"
-      - AND:
-          - term:
-              event.code: 1    # Process creation
-          - query_string:
-              query: "process.hash.md5:*E57D8C1B51D6F3D4BE6CB433F412B130* OR process.hash.sha1:*67AC75AF5C866813FCC03C01C6161DEF82D3A329* OR process.hash.sha256:*CB115F76B62176CAFA16DD55BA0B82E1C7D4DD59A06D45E0FB9CD0F657D95DCF*"
-      - AND:
-          - term:
-              event.code: 7    # Image loaded
-          - query_string:
-              query: "file.name:*mimikatz* OR file.hash.md5:*CF5A176CC1B0E7BAD4FDC8AAD1C0F721* OR file.hash.sha1:*BDDA887D4F46278C67F9B946178BF0087AB33E6E*"
+  - query:
+      query_string:
+        query: 'file.hash.sha256 : 92804faaab2175dc501d73e814663058c78c0a042675a8937266357bcfb96c50 AND winlog.task : *FileCreateStreamHash*'
 
-# How often ElastAlert will query Elasticsearch
-realert:
-  minutes: 5
-
-# Number of events that must be detected
-threshold: 1
-
-# Alert to Discord
+# Alerter: discord
 alert:
-  - "discord"
-  - "email"
+  - discord
 
-# Discord webhook settings
-discord_webhook_url: "https://discord.com/api/webhooks/your-webhook-id"
-
-# Email settings
-email:
-  - "security-team@example.com"
-
-# Alert details
-alert_subject: "EDR Alert: Potential Mimikatz Activity Detected"
-alert_subject_args: []
-alert_text: |
-  Potential Mimikatz activity has been detected on a system.
-  
-  Host Details:
-  Hostname: {0}
-  IP Address: {1}
-  
-  Event Details:
-  Timestamp: {2}
-  Process: {3}
-  Command Line: {4}
-  User: {5}
-  
-  File Details:
-  MD5: {6}
-  SHA1: {7}
-  SHA256: {8}
-  
-  Full Event:
-  {9}
-alert_text_args:
-  - host.name
-  - host.ip
-  - "@timestamp"
-  - process.name
-  - process.command_line
-  - user.name
-  - process.hash.md5
-  - process.hash.sha1
-  - process.hash.sha256
-  - _source
-
-# Alert Severity
+# Cấu hình gửi Discord
+# Bạn cần webhook_url thật, dạng: https://discord.com/api/webhooks/<ID>/<TOKEN>
+discord_webhook_url: "https://discord.com/api/webhooks/1349386651637514320/gy8UKWZgtwIYHVmcycqmaAocMLRUu3mJFapw_3vLX5dG3_9PVAVvft4q50GWcYmafksW"
+discord_webhook_username: "ElastAlert Bot"
+discord_webhook_title: "Mimikatz File Found"
+discord_embed_color: 0xFF0000
+# Kiểu văn bản, dùng các placeholder {match[...]} để chèn giá trị từ log match
 alert_text_type: alert_text_only
-priority: 2
-category: credential-access 
+alert_text: |
+  🚨 **Mimikatz detected!** 🚨
+  **Host**: {0}
+  **User**: {1}
+  **File Path**: {2}
+  **SHA256 Hash**: {3}
+  **Time**: {4}
+
+# Cung cấp danh sách các field để chèn vào {0}, {1}, ..., {6}
+alert_text_args:
+  - host.hostname
+  - user.name
+  - file.path
+  - file.hash.sha256
+  - event.created

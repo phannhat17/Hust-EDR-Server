@@ -14,11 +14,12 @@ import {
 } from '@/components/ui/table'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from '@/hooks/use-toast'
-import { Trash2, Edit, Play } from 'lucide-react'
+import { Trash2, Edit, Play, Plus } from 'lucide-react'
 import {
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
@@ -39,6 +40,404 @@ import { Main } from '@/components/layout/main'
 import { TopNav } from '@/components/layout/top-nav'
 import { Search } from '@/components/search'
 import { ThemeSwitch } from '@/components/theme-switch'
+import { useState } from 'react'
+import { z } from 'zod'
+import { useForm } from 'react-hook-form'
+import { zodResolver } from '@hookform/resolvers/zod'
+import {
+  Form,
+  FormControl,
+  FormDescription,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from '@/components/ui/form'
+import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import { Switch } from '@/components/ui/switch'
+
+// Rule form schema for validation
+const ruleFormSchema = z.object({
+  name: z.string().min(2, { message: 'Name must be at least 2 characters' }),
+  type: z.string().min(1, { message: 'Type is required' }),
+  index: z.string().min(1, { message: 'Index pattern is required' }),
+  alert: z.array(z.string()).min(1, { message: 'At least one alert type is required' }),
+  description: z.string().optional(),
+  is_enabled: z.boolean().default(true),
+  filter: z.array(z.record(z.any())).optional(),
+  alert_subject: z.string().optional(),
+  alert_text: z.string().optional(),
+  alert_text_type: z.string().optional(),
+  timestamp_field: z.string().optional(),
+  extra_settings: z.record(z.any()).optional(),
+});
+
+type RuleFormValues = z.infer<typeof ruleFormSchema>;
+
+// Rule form component
+function RuleForm({ rule, onSubmit, onCancel }: { 
+  rule?: Rule; 
+  onSubmit: (data: any) => void;
+  onCancel: () => void;
+}) {
+  const isEdit = !!rule;
+  
+  // Extract alert types from the rule.alert array
+  const alertTypes = rule?.alert || [];
+  
+  // Set default values or use provided rule
+  const defaultValues = rule ? {
+    ...rule,
+    alert: alertTypes,
+    is_enabled: rule.is_enabled !== false, // Default to true if not specified
+    filter: rule.filter || [],
+  } : {
+    name: '',
+    type: 'any',
+    index: 'logs-*',
+    alert: ['email'],
+    is_enabled: true,
+    description: '',
+    alert_subject: '',
+    alert_text: '',
+    alert_text_type: 'plain',
+    timestamp_field: '@timestamp',
+    filter: [],
+    extra_settings: {},
+  };
+  
+  // Setup form with validation
+  const form = useForm<RuleFormValues>({
+    resolver: zodResolver(ruleFormSchema),
+    defaultValues,
+  });
+  
+  // Handle form submission
+  const handleSubmit = (data: RuleFormValues) => {
+    onSubmit(data);
+  };
+
+  // Handle alert tag deletion
+  const handleDeleteTag = (index: number) => {
+    const currentAlerts = form.getValues("alert");
+    const newAlerts = [...currentAlerts];
+    newAlerts.splice(index, 1);
+    form.setValue("alert", newAlerts, { shouldValidate: true });
+  };
+
+  // Handle adding new alert tag
+  const [newAlertType, setNewAlertType] = useState("");
+  const handleAddTag = () => {
+    if (!newAlertType.trim()) return;
+    
+    const currentAlerts = form.getValues("alert");
+    form.setValue("alert", [...currentAlerts, newAlertType.trim()], { shouldValidate: true });
+    setNewAlertType("");
+  };
+  
+  return (
+    <Form {...form}>
+      <form onSubmit={form.handleSubmit(handleSubmit)} className="space-y-6">
+        <div className="grid grid-cols-1 gap-6">
+          {/* Section: Basic Information */}
+          <div className="rounded-lg border p-4 bg-accent/10">
+            <h3 className="text-lg font-medium mb-4">Basic Information</h3>
+            <div className="grid grid-cols-2 gap-4">
+              <FormField
+                control={form.control}
+                name="name"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel className="flex items-center">
+                      Rule Name
+                      <span className="text-destructive ml-1">*</span>
+                    </FormLabel>
+                    <FormControl>
+                      <Input placeholder="My Rule" {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              
+              <FormField
+                control={form.control}
+                name="is_enabled"
+                render={({ field }) => (
+                  <FormItem className="flex flex-row items-center justify-between rounded-lg border p-3 shadow-sm">
+                    <div className="space-y-0.5">
+                      <FormLabel className="text-base">Enabled</FormLabel>
+                      <FormDescription>
+                        Enable or disable this rule
+                      </FormDescription>
+                    </div>
+                    <FormControl>
+                      <Switch
+                        checked={field.value}
+                        onCheckedChange={field.onChange}
+                      />
+                    </FormControl>
+                  </FormItem>
+                )}
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-4 mt-4">
+              <FormField
+                control={form.control}
+                name="type"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel className="flex items-center">
+                      Rule Type
+                      <span className="text-destructive ml-1">*</span>
+                    </FormLabel>
+                    <Select onValueChange={field.onChange} defaultValue={field.value}>
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select rule type" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value="any">Any</SelectItem>
+                        <SelectItem value="blacklist">Blacklist</SelectItem>
+                        <SelectItem value="whitelist">Whitelist</SelectItem>
+                        <SelectItem value="change">Change</SelectItem>
+                        <SelectItem value="frequency">Frequency</SelectItem>
+                        <SelectItem value="spike">Spike</SelectItem>
+                        <SelectItem value="flatline">Flatline</SelectItem>
+                        <SelectItem value="new_term">New Term</SelectItem>
+                        <SelectItem value="cardinality">Cardinality</SelectItem>
+                        <SelectItem value="metric_aggregation">Metric Aggregation</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <FormDescription>
+                      The type of rule determines how ElastAlert processes events
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              
+              <FormField
+                control={form.control}
+                name="index"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel className="flex items-center">
+                      Index Pattern
+                      <span className="text-destructive ml-1">*</span>
+                    </FormLabel>
+                    <FormControl>
+                      <Input placeholder="logs-*" {...field} />
+                    </FormControl>
+                    <FormDescription>
+                      Elasticsearch index pattern to search
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            </div>
+            
+            <div className="mt-4">
+              <FormField
+                control={form.control}
+                name="timestamp_field"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Timestamp Field</FormLabel>
+                    <FormControl>
+                      <Input placeholder="@timestamp" {...field} />
+                    </FormControl>
+                    <FormDescription>
+                      Field containing the timestamp in your documents
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            </div>
+            
+            <div className="mt-4">
+              <FormField
+                control={form.control}
+                name="description"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Description</FormLabel>
+                    <FormControl>
+                      <Textarea
+                        placeholder="Enter a description for this rule"
+                        className="resize-none min-h-[100px]"
+                        {...field}
+                      />
+                    </FormControl>
+                    <FormDescription>
+                      Detailed description of what this rule detects
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            </div>
+          </div>
+          
+          {/* Section: Alert Configuration */}
+          <div className="rounded-lg border p-4 bg-accent/10">
+            <h3 className="text-lg font-medium mb-4">Alert Configuration</h3>
+            
+            <FormField
+              control={form.control}
+              name="alert"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel className="flex items-center">
+                    Alert Types
+                    <span className="text-destructive ml-1">*</span>
+                  </FormLabel>
+                  <FormDescription className="mt-0 mb-2">
+                    Specify where alerts should be sent (email, slack, discord, etc.)
+                  </FormDescription>
+                  
+                  <div className="flex flex-wrap gap-2 mb-2">
+                    {field.value.map((tag, index) => (
+                      <span 
+                        key={index}
+                        className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-primary/20 text-primary-foreground"
+                      >
+                        {tag}
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteTag(index)}
+                          className="ml-1 h-4 w-4 rounded-full inline-flex items-center justify-center text-primary-foreground hover:bg-primary/30"
+                        >
+                          ×
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                  
+                  <div className="flex">
+                    <Input 
+                      className="rounded-r-none"
+                      placeholder="Add alert type (e.g., email, slack)"
+                      value={newAlertType}
+                      onChange={(e) => setNewAlertType(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          handleAddTag();
+                        }
+                      }}
+                    />
+                    <Button 
+                      type="button"
+                      onClick={handleAddTag}
+                      className="rounded-l-none"
+                    >
+                      Add
+                    </Button>
+                  </div>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            
+            <div className="grid grid-cols-2 gap-4 mt-4">
+              <FormField
+                control={form.control}
+                name="alert_subject"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Alert Subject</FormLabel>
+                    <FormControl>
+                      <Input placeholder="EDR Alert: Potential Threat Detected" {...field} />
+                    </FormControl>
+                    <FormDescription>
+                      Subject line for email alerts
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              
+              <FormField
+                control={form.control}
+                name="alert_text_type"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Alert Text Type</FormLabel>
+                    <Select onValueChange={field.onChange} defaultValue={field.value}>
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select text type" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value="plain">Plain</SelectItem>
+                        <SelectItem value="alert_text_only">Alert Text Only</SelectItem>
+                        <SelectItem value="exclude_fields">Exclude Fields</SelectItem>
+                        <SelectItem value="aggregation_summary_only">Aggregation Summary</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <FormDescription>
+                      Format of the alert content
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            </div>
+            
+            <div className="mt-4">
+              <FormField
+                control={form.control}
+                name="alert_text"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Alert Text</FormLabel>
+                    <FormControl>
+                      <Textarea
+                        placeholder="Enter the text for the alert notification"
+                        className="resize-none min-h-[100px]"
+                        {...field}
+                      />
+                    </FormControl>
+                    <FormDescription>
+                      Text body of the alert message
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            </div>
+          </div>
+          
+          {/* Advanced section could be added here for filter configuration */}
+          {/* This would be expanded in a future enhancement */}
+        </div>
+        
+        <DialogFooter className="pt-2 border-t">
+          <Button type="button" variant="outline" onClick={onCancel}>
+            Cancel
+          </Button>
+          <Button type="submit">
+            {isEdit ? 'Update Rule' : 'Create Rule'}
+          </Button>
+        </DialogFooter>
+      </form>
+    </Form>
+  );
+}
 
 export const Route = createFileRoute('/_authenticated/rules')({
   component: RulesPage
@@ -84,12 +483,57 @@ function RulesPage() {
     },
   })
 
+  const editMutation = useMutation({
+    mutationFn: ({ filename, ruleData }: { filename: string, ruleData: any }) => 
+      rulesApi.updateRule(filename, ruleData),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['rules'] })
+      toast({
+        title: 'Rule updated',
+        description: 'The rule has been updated successfully.',
+      })
+    },
+  })
+
+  const createMutation = useMutation({
+    mutationFn: (ruleData: any) => rulesApi.createRule(ruleData),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['rules'] })
+      toast({
+        title: 'Rule created',
+        description: 'The rule has been created successfully.',
+      })
+    },
+  })
+
+  const [selectedRule, setSelectedRule] = useState<Rule | null>(null)
+  const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false)
+
   const handleDelete = (filename: string) => {
     deleteMutation.mutate(filename)
   }
 
   const handleRestart = () => {
     restartMutation.mutate()
+  }
+
+  const handleEdit = (rule: Rule) => {
+    setSelectedRule(rule)
+  }
+
+  const handleEditSubmit = (data: any) => {
+    if (selectedRule) {
+      editMutation.mutate({ 
+        filename: selectedRule.filename, 
+        ruleData: data 
+      })
+      setSelectedRule(null)
+    }
+  }
+
+  const handleCreateSubmit = (data: any) => {
+    createMutation.mutate(data)
+    setIsCreateDialogOpen(false)
   }
 
   // Generate topNav with proper active states based on current URL params
@@ -137,6 +581,9 @@ function RulesPage() {
             <Button variant="outline" onClick={() => queryClient.invalidateQueries({ queryKey: ['rules'] })}>
               Refresh
             </Button>
+            <Button onClick={() => setIsCreateDialogOpen(true)}>
+              <Plus className="mr-2 h-4 w-4" /> Create Rule
+            </Button>
             <Button onClick={handleRestart}>
               <Play className="mr-2 h-4 w-4" /> Restart ElastAlert
             </Button>
@@ -175,27 +622,13 @@ function RulesPage() {
                       <TableCell>{rule.index}</TableCell>
                       <TableCell>
                         <div className="flex gap-2">
-                          <Dialog>
-                            <DialogTrigger asChild>
-                              <Button variant="outline" size="icon">
-                                <Edit className="h-4 w-4" />
-                              </Button>
-                            </DialogTrigger>
-                            <DialogContent className="sm:max-w-2xl">
-                              <DialogHeader>
-                                <DialogTitle>Edit Rule: {rule.name}</DialogTitle>
-                                <DialogDescription>
-                                  Modify the rule configuration
-                                </DialogDescription>
-                              </DialogHeader>
-                              <div className="grid gap-4 py-4">
-                                {/* Form content would go here */}
-                                <pre className="bg-slate-100 p-4 rounded text-xs overflow-auto max-h-96">
-                                  {JSON.stringify(rule, null, 2)}
-                                </pre>
-                              </div>
-                            </DialogContent>
-                          </Dialog>
+                          <Button 
+                            variant="outline" 
+                            size="icon"
+                            onClick={() => handleEdit(rule)}
+                          >
+                            <Edit className="h-4 w-4" />
+                          </Button>
                           
                           <AlertDialog>
                             <AlertDialogTrigger asChild>
@@ -229,6 +662,41 @@ function RulesPage() {
           </CardContent>
         </Card>
       </Main>
+
+      {/* Edit Rule Dialog */}
+      <Dialog open={!!selectedRule} onOpenChange={(open) => !open && setSelectedRule(null)}>
+        <DialogContent className="sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Edit Rule: {selectedRule?.name}</DialogTitle>
+            <DialogDescription>
+              Modify the rule configuration
+            </DialogDescription>
+          </DialogHeader>
+          {selectedRule && (
+            <RuleForm 
+              rule={selectedRule} 
+              onSubmit={handleEditSubmit}
+              onCancel={() => setSelectedRule(null)}
+            />
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Create Rule Dialog */}
+      <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
+        <DialogContent className="sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Create New Rule</DialogTitle>
+            <DialogDescription>
+              Create a new ElastAlert detection rule
+            </DialogDescription>
+          </DialogHeader>
+          <RuleForm 
+            onSubmit={handleCreateSubmit}
+            onCancel={() => setIsCreateDialogOpen(false)}
+          />
+        </DialogContent>
+      </Dialog>
     </>
   )
 } 
