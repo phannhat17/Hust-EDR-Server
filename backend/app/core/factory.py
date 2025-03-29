@@ -40,9 +40,11 @@ def create_app():
     from app.api.routes.dashboard import dashboard_bp
     from app.api.routes.alerts import alerts_bp
     from app.api.routes.rules import rules_bp
+    from app.api.routes.agents import agents_bp
     
     app.register_blueprint(dashboard_bp)
     app.register_blueprint(alerts_bp)
     app.register_blueprint(rules_bp)
+    app.register_blueprint(agents_bp, url_prefix='/api')
     
     return app

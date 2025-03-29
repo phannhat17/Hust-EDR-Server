@@ -1,0 +1,38 @@
+syntax = "proto3";
+
+package agent;
+
+option go_package = "github.com/hustonpi/edr-agent/proto";
+
+service AgentService {
+  // SendMachineInfo sends machine information to the server
+  rpc SendMachineInfo (MachineInfoRequest) returns (MachineInfoResponse) {}
+}
+
+// MachineInfoRequest contains Windows machine information
+message MachineInfoRequest {
+  string hostname = 1;
+  string os_version = 2;
+  string cpu_info = 3;
+  int64 total_memory = 4;
+  int64 free_memory = 5;
+  string ip_address = 6;
+  string mac_address = 7;
+  repeated DiskInfo disks = 8;
+  string agent_version = 9;
+  int64 timestamp = 10;
+}
+
+// DiskInfo contains disk information
+message DiskInfo {
+  string drive_letter = 1;
+  string file_system = 2;
+  int64 total_size = 3;
+  int64 free_space = 4;
+}
+
+// MachineInfoResponse is the server's response
+message MachineInfoResponse {
+  bool success = 1;
+  string message = 2;
+} 
