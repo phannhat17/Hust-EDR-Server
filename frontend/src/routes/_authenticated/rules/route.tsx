@@ -40,7 +40,7 @@ import { Main } from '@/components/layout/main'
 import { TopNav } from '@/components/layout/top-nav'
 import { Search } from '@/components/search'
 import { ThemeSwitch } from '@/components/theme-switch'
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import { z } from 'zod'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -659,8 +659,8 @@ export const Route = createFileRoute('/_authenticated/rules')({
 function RulesPage() {
   const router = useRouter()
   
-  // Get the current status filter from URL
-  const { status: statusFilter } = router.state.location.search as { status?: string }
+  // Replace URL status filter with a direct state approach
+  const [activeFilter, setActiveFilter] = useState<string>('all');
 
   // Get all rules and filter on client-side
   const { data: allRules = [], isLoading } = useQuery({
@@ -668,10 +668,18 @@ function RulesPage() {
     queryFn: () => rulesApi.getRules(),
   })
 
-  // Filter rules based on status
-  const rules = statusFilter
-    ? allRules.filter((rule: Rule) => rule.is_enabled === (statusFilter === 'active'))
-    : allRules;
+  // Enhanced filtering logic for rules based on selected filter
+  const rules = useMemo(() => {
+    if (!allRules.length) return [];
+    
+    if (activeFilter === 'active') {
+      return allRules.filter((rule: Rule) => rule.is_enabled !== false);
+    } else if (activeFilter === 'disabled') {
+      return allRules.filter((rule: Rule) => rule.is_enabled === false);
+    }
+    
+    return allRules;
+  }, [allRules, activeFilter]);
 
   const queryClient = useQueryClient()
 
@@ -794,29 +802,24 @@ function RulesPage() {
     }
   };
 
-  // Generate topNav with proper active states based on current URL params
-  const getTopNav = () => {
-    return [
-      {
-        title: 'All Rules',
-        href: '/rules',
-        isActive: !statusFilter,
-        disabled: false,
-      },
-      {
-        title: 'Active',
-        href: '/rules?status=active',
-        isActive: statusFilter === 'active',
-        disabled: false,
-      },
-      {
-        title: 'Disabled',
-        href: '/rules?status=disabled',
-        isActive: statusFilter === 'disabled',
-        disabled: false,
-      }
-    ];
-  };
+  // Build filter tabs
+  const filterTabs = [
+    {
+      id: 'all',
+      label: 'All Rules',
+      count: allRules.length,
+    },
+    {
+      id: 'active',
+      label: 'Active',
+      count: allRules.filter((rule: Rule) => rule.is_enabled !== false).length,
+    },
+    {
+      id: 'disabled',
+      label: 'Disabled',
+      count: allRules.filter((rule: Rule) => rule.is_enabled === false).length,
+    }
+  ];
 
   const openDeleteDialog = (rule: Rule) => {
     setRuleToDelete(rule);
@@ -827,7 +830,26 @@ function RulesPage() {
     <>
       {/* ===== Top Heading ===== */}
       <Header>
-        <TopNav links={getTopNav()} />
+        <div className="flex items-center space-x-4">
+          <div className="flex overflow-x-auto">
+            {filterTabs.map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => setActiveFilter(tab.id)}
+                className={`px-4 py-2 font-medium text-sm whitespace-nowrap ${
+                  activeFilter === tab.id
+                    ? 'border-b-2 border-primary text-primary'
+                    : 'text-muted-foreground hover:text-foreground hover:bg-accent/50'
+                }`}
+              >
+                {tab.label}
+                <span className="ml-2 rounded-full bg-muted px-2 py-0.5 text-xs font-medium">
+                  {tab.count}
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
         <div className='ml-auto flex items-center space-x-4'>
           <Search />
           <ThemeSwitch />
@@ -838,7 +860,9 @@ function RulesPage() {
       <Main>
         <div className="flex items-center justify-between mb-4">
           <h1 className="text-2xl font-bold">
-            {statusFilter ? `${statusFilter.charAt(0).toUpperCase() + statusFilter.slice(1)} Rules` : 'All Rules'}
+            {activeFilter !== 'all'
+              ? `${activeFilter.charAt(0).toUpperCase() + activeFilter.slice(1)} Rules`
+              : 'All Rules'}
           </h1>
           <div className="flex gap-2">
             <Button variant="outline" onClick={() => queryClient.invalidateQueries({ queryKey: ['rules'] })}>
@@ -868,9 +892,9 @@ function RulesPage() {
           <CardHeader>
             <CardTitle>Rule List</CardTitle>
             <CardDescription>
-              {statusFilter 
-                ? `Viewing ${statusFilter} rules` 
-                : 'View and manage all ElastAlert rules'}
+              {activeFilter !== 'all'
+                ? `Viewing ${activeFilter} rules (${rules.length})`
+                : `View and manage all ElastAlert rules (${rules.length})`}
             </CardDescription>
           </CardHeader>
           <CardContent>

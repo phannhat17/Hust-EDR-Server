@@ -22,7 +22,7 @@ import {
 } from '@/components/ui/select'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from '@/hooks/use-toast'
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { Header } from '@/components/layout/header'
 import { Main } from '@/components/layout/main'
 import { TopNav } from '@/components/layout/top-nav'
@@ -49,8 +49,8 @@ function AlertsPage() {
   const [selectedAlert, setSelectedAlert] = useState<Alert | null>(null)
   const [detailsOpen, setDetailsOpen] = useState(false)
   
-  // Get the current status filter from URL
-  const { status: statusFilter } = router.state.location.search as { status?: string }
+  // Replace URL-based status filter with direct state approach
+  const [activeFilter, setActiveFilter] = useState<string>('all');
 
   // Get all alerts and filter client-side to fix type issue
   const { data: allAlerts = [], isLoading } = useQuery({
@@ -59,10 +59,16 @@ function AlertsPage() {
     refetchInterval: refreshInterval,
   })
 
-  // Filter alerts based on status
-  const alerts = statusFilter
-    ? allAlerts.filter((alert: Alert) => alert.status === statusFilter)
-    : allAlerts;
+  // Enhanced filtering logic for alerts based on selected filter
+  const alerts = useMemo(() => {
+    if (!allAlerts.length) return [];
+    
+    if (activeFilter !== 'all') {
+      return allAlerts.filter((alert: Alert) => alert.status === activeFilter);
+    }
+    
+    return allAlerts;
+  }, [allAlerts, activeFilter]);
 
   const queryClient = useQueryClient()
 
@@ -180,41 +186,59 @@ function AlertsPage() {
     }
   };
 
-  // Generate topNav with proper active states based on current URL params
-  const getTopNav = () => {
-    return [
-      {
-        title: 'All Alerts',
-        href: '/alerts',
-        isActive: !statusFilter,
-        disabled: false,
-      },
-      {
-        title: 'New',
-        href: '/alerts?status=new',
-        isActive: statusFilter === 'new',
-        disabled: false,
-      },
-      {
-        title: 'In Progress',
-        href: '/alerts?status=in_progress',
-        isActive: statusFilter === 'in_progress',
-        disabled: false,
-      },
-      {
-        title: 'Resolved',
-        href: '/alerts?status=resolved',
-        isActive: statusFilter === 'resolved',
-        disabled: false,
-      },
-    ];
-  };
+  // Build filter tabs
+  const filterTabs = [
+    {
+      id: 'all',
+      label: 'All Alerts',
+      count: allAlerts.length,
+    },
+    {
+      id: 'new',
+      label: 'New',
+      count: allAlerts.filter((alert: Alert) => alert.status === 'new').length,
+    },
+    {
+      id: 'in_progress',
+      label: 'In Progress',
+      count: allAlerts.filter((alert: Alert) => alert.status === 'in_progress').length,
+    },
+    {
+      id: 'resolved',
+      label: 'Resolved',
+      count: allAlerts.filter((alert: Alert) => alert.status === 'resolved').length,
+    },
+    {
+      id: 'false_positive',
+      label: 'False Positive',
+      count: allAlerts.filter((alert: Alert) => alert.status === 'false_positive').length,
+    }
+  ];
 
   return (
     <>
       {/* ===== Top Heading ===== */}
       <Header>
-        <TopNav links={getTopNav()} />
+        <div className="flex items-center space-x-4">
+          <div className="flex overflow-x-auto">
+            {filterTabs.map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => setActiveFilter(tab.id)}
+                className={`px-4 py-2 font-medium text-sm whitespace-nowrap ${
+                  activeFilter === tab.id
+                    ? 'border-b-2 border-primary text-primary'
+                    : 'text-muted-foreground hover:text-foreground hover:bg-accent/50'
+                }`}
+              >
+                {tab.label}
+                <span className="ml-2 rounded-full bg-muted px-2 py-0.5 text-xs font-medium">
+                  {tab.count}
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
         <div className='ml-auto flex items-center space-x-4'>
           <Search />
           <ThemeSwitch />
@@ -225,7 +249,12 @@ function AlertsPage() {
       <Main>
         <div className="flex items-center justify-between mb-4">
           <h1 className="text-2xl font-bold">
-            {statusFilter ? `${statusFilter.charAt(0).toUpperCase() + statusFilter.slice(1).replace('_', ' ')} Alerts` : 'All Alerts'}
+            {activeFilter !== 'all' 
+              ? `${activeFilter === 'false_positive' 
+                  ? 'False Positive' 
+                  : activeFilter.charAt(0).toUpperCase() + activeFilter.slice(1).replace('_', ' ')
+                } Alerts` 
+              : 'All Alerts'}
           </h1>
           <div className="flex gap-2 items-center">
             <Select
@@ -254,9 +283,12 @@ function AlertsPage() {
           <CardHeader>
             <CardTitle>Alert List</CardTitle>
             <CardDescription>
-              {statusFilter 
-                ? `Viewing ${statusFilter.replace('_', ' ')} alerts`
-                : 'View and manage all security alerts'}
+              {activeFilter !== 'all' 
+                ? `Viewing ${activeFilter === 'false_positive' 
+                    ? 'false positive' 
+                    : activeFilter.replace('_', ' ')
+                  } alerts (${alerts.length})`
+                : `View and manage all security alerts (${alerts.length})`}
               {refreshInterval > 0 && ` • Auto-refreshes every ${refreshInterval / 1000} seconds`}
             </CardDescription>
           </CardHeader>
