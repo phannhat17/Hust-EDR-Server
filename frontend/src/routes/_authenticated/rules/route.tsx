@@ -83,12 +83,17 @@ const ruleFormSchema = z.object({
 type RuleFormValues = z.infer<typeof ruleFormSchema>;
 
 // Rule form component
-function RuleForm({ rule, onSubmit, onCancel }: { 
+function RuleForm({ 
+  rule, 
+  onSubmit, 
+  onCancel 
+}: { 
   rule?: Rule; 
-  onSubmit: (data: any) => void;
+  onSubmit: (data: any) => Promise<any>;
   onCancel: () => void;
 }) {
   const isEdit = !!rule;
+  const [submitting, setSubmitting] = useState(false);
   
   // Extract alert types from the rule.alert array
   const alertTypes = rule?.alert || [];
@@ -122,7 +127,21 @@ function RuleForm({ rule, onSubmit, onCancel }: {
   
   // Handle form submission
   const handleSubmit = (data: RuleFormValues) => {
-    onSubmit(data);
+    setSubmitting(true);
+    onSubmit({
+      ...data,
+      // Merge the form data with any additional data needed
+    })
+      .then(() => {
+        // Handle successful submission
+      })
+      .catch((error) => {
+        // Handle error
+        console.error("Error submitting form:", error);
+      })
+      .finally(() => {
+        setSubmitting(false);
+      });
   };
 
   // Handle alert tag deletion
@@ -427,11 +446,18 @@ function RuleForm({ rule, onSubmit, onCancel }: {
         </div>
         
         <DialogFooter className="pt-2 border-t">
-          <Button type="button" variant="outline" onClick={onCancel}>
+          <Button type="button" variant="outline" onClick={onCancel} disabled={submitting}>
             Cancel
           </Button>
-          <Button type="submit">
-            {isEdit ? 'Update Rule' : 'Create Rule'}
+          <Button type="submit" disabled={submitting}>
+            {submitting ? (
+              <>
+                <span className="animate-spin mr-2">⟳</span>
+                {isEdit ? 'Updating Rule...' : 'Creating Rule...'}
+              </>
+            ) : (
+              <>{isEdit ? 'Update Rule' : 'Create Rule'}</>
+            )}
           </Button>
         </DialogFooter>
       </form>
@@ -446,12 +472,13 @@ function YamlEditor({
   onCancel 
 }: { 
   rule?: Rule; 
-  onSubmit: (data: any) => void;
+  onSubmit: (data: any) => Promise<any>;
   onCancel: () => void;
 }) {
   const [yamlContent, setYamlContent] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
 
   // Load the rule YAML when component mounts
   useEffect(() => {
@@ -479,6 +506,7 @@ function YamlEditor({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    setSubmitting(true);
     
     try {
       // Submit the raw YAML content
@@ -489,6 +517,8 @@ function YamlEditor({
     } catch (err) {
       console.error('Error saving YAML:', err);
       setError('Failed to save rule YAML content');
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -516,15 +546,23 @@ function YamlEditor({
           onChange={(e) => setYamlContent(e.target.value)}
           className="font-mono text-sm min-h-[400px] resize-y"
           placeholder="# Loading rule content..."
+          disabled={submitting}
         />
       </div>
       
       <DialogFooter className="pt-2 border-t">
-        <Button type="button" variant="outline" onClick={onCancel}>
+        <Button type="button" variant="outline" onClick={onCancel} disabled={submitting}>
           Cancel
         </Button>
-        <Button type="submit">
-          Save Changes
+        <Button type="submit" disabled={submitting}>
+          {submitting ? (
+            <>
+              <span className="animate-spin mr-2">⟳</span>
+              Saving...
+            </>
+          ) : (
+            'Save Changes'
+          )}
         </Button>
       </DialogFooter>
     </form>
@@ -554,16 +592,36 @@ function RulesPage() {
 
   const queryClient = useQueryClient()
 
+  const [deletingRuleId, setDeletingRuleId] = useState<string | null>(null);
+  // Add state to control alert dialog visibility
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [ruleToDelete, setRuleToDelete] = useState<Rule | null>(null);
+
   const deleteMutation = useMutation({
-    mutationFn: (filename: string) => rulesApi.deleteRule(filename),
+    mutationFn: (filename: string) => {
+      setDeletingRuleId(filename);
+      return rulesApi.deleteRule(filename);
+    },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['rules'] })
+      queryClient.invalidateQueries({ queryKey: ['rules'] });
       toast({
         title: 'Rule deleted',
         description: 'The rule has been deleted successfully.',
-      })
+      });
+      setDeletingRuleId(null);
+      // Close the dialog after successful deletion
+      setDeleteDialogOpen(false);
+      setRuleToDelete(null);
     },
-  })
+    onError: (error) => {
+      setDeletingRuleId(null);
+      toast({
+        title: 'Error',
+        description: 'Failed to delete rule: ' + String(error),
+        variant: 'destructive'
+      });
+    }
+  });
 
   const restartMutation = useMutation({
     mutationFn: () => rulesApi.restartElastAlert(),
@@ -602,7 +660,7 @@ function RulesPage() {
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false)
 
   const handleDelete = (filename: string) => {
-    deleteMutation.mutate(filename)
+    deleteMutation.mutate(filename);
   }
 
   const handleRestart = () => {
@@ -620,6 +678,7 @@ function RulesPage() {
         });
         setSelectedRule(null);
       }
+      return Promise.resolve();
     } catch (error) {
       console.error("Error updating rule YAML:", error);
       toast({
@@ -627,6 +686,7 @@ function RulesPage() {
         description: 'Failed to update rule YAML. Please check your syntax.',
         variant: 'destructive'
       });
+      return Promise.reject(error);
     }
   };
 
@@ -639,6 +699,7 @@ function RulesPage() {
         description: 'The rule has been created successfully.',
       });
       setIsCreateDialogOpen(false);
+      return Promise.resolve();
     } catch (error) {
       console.error("Error creating rule from YAML:", error);
       toast({
@@ -646,6 +707,7 @@ function RulesPage() {
         description: 'Failed to create rule. Please check your YAML syntax.',
         variant: 'destructive'
       });
+      return Promise.reject(error);
     }
   };
 
@@ -673,6 +735,11 @@ function RulesPage() {
     ];
   };
 
+  const openDeleteDialog = (rule: Rule) => {
+    setRuleToDelete(rule);
+    setDeleteDialogOpen(true);
+  };
+
   return (
     <>
       {/* ===== Top Heading ===== */}
@@ -697,8 +764,19 @@ function RulesPage() {
             <Button onClick={() => setIsCreateDialogOpen(true)}>
               <Plus className="mr-2 h-4 w-4" /> Create Rule
             </Button>
-            <Button onClick={handleRestart}>
-              <Play className="mr-2 h-4 w-4" /> Restart ElastAlert
+            <Button 
+              onClick={handleRestart}
+              disabled={restartMutation.isPending}
+            >
+              {restartMutation.isPending ? (
+                <>
+                  <span className="animate-spin mr-2">⟳</span> Restarting...
+                </>
+              ) : (
+                <>
+                  <Play className="mr-2 h-4 w-4" /> Restart ElastAlert
+                </>
+              )}
             </Button>
           </div>
         </div>
@@ -743,28 +821,13 @@ function RulesPage() {
                             <Edit className="h-4 w-4" />
                           </Button>
                           
-                          <AlertDialog>
-                            <AlertDialogTrigger asChild>
-                              <Button variant="outline" size="icon">
-                                <Trash2 className="h-4 w-4" />
-                              </Button>
-                            </AlertDialogTrigger>
-                            <AlertDialogContent>
-                              <AlertDialogHeader>
-                                <AlertDialogTitle>Are you sure?</AlertDialogTitle>
-                                <AlertDialogDescription>
-                                  This will permanently delete the rule "{rule.name}".
-                                  You won't be able to recover it.
-                                </AlertDialogDescription>
-                              </AlertDialogHeader>
-                              <AlertDialogFooter>
-                                <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                <AlertDialogAction onClick={() => handleDelete(rule.filename)}>
-                                  Delete
-                                </AlertDialogAction>
-                              </AlertDialogFooter>
-                            </AlertDialogContent>
-                          </AlertDialog>
+                          <Button 
+                            variant="outline" 
+                            size="icon" 
+                            onClick={() => openDeleteDialog(rule)}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
                         </div>
                       </TableCell>
                     </TableRow>
@@ -813,6 +876,38 @@ function RulesPage() {
           />
         </DialogContent>
       </Dialog>
+
+      {/* Delete Rule Dialog */}
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete the rule "{ruleToDelete?.name}".
+              You won't be able to recover it.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deletingRuleId === ruleToDelete?.filename}>
+              Cancel
+            </AlertDialogCancel>
+            <Button 
+              variant="destructive"
+              onClick={() => ruleToDelete && handleDelete(ruleToDelete.filename)}
+              disabled={deletingRuleId === ruleToDelete?.filename}
+            >
+              {deletingRuleId === ruleToDelete?.filename ? (
+                <>
+                  <span className="animate-spin mr-2">⟳</span>
+                  Deleting...
+                </>
+              ) : (
+                'Delete'
+              )}
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   )
 } 
