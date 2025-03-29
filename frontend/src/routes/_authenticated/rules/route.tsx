@@ -40,7 +40,7 @@ import { Main } from '@/components/layout/main'
 import { TopNav } from '@/components/layout/top-nav'
 import { Search } from '@/components/search'
 import { ThemeSwitch } from '@/components/theme-switch'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { z } from 'zod'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -465,7 +465,7 @@ function RuleForm({
   );
 }
 
-// YamlEditor component for direct YAML editing
+// YamlEditor component for direct YAML editing with syntax highlighting
 function YamlEditor({ 
   rule, 
   onSubmit, 
@@ -479,6 +479,9 @@ function YamlEditor({
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [lineCount, setLineCount] = useState(1);
+  const editorRef = useRef<HTMLTextAreaElement>(null);
+  const editorContainerRef = useRef<HTMLDivElement>(null);
 
   // Load the rule YAML when component mounts
   useEffect(() => {
@@ -492,6 +495,7 @@ function YamlEditor({
         // Get the raw YAML content
         const response = await rulesApi.getRuleYaml(rule.filename);
         setYamlContent(response.content || '');
+        setLineCount((response.content || '').split('\n').length);
       } catch (err) {
         console.error('Error fetching rule YAML:', err);
         setError('Failed to load rule YAML content');
@@ -502,6 +506,34 @@ function YamlEditor({
 
     fetchRuleYaml();
   }, [rule]);
+
+  // Update line count when content changes
+  useEffect(() => {
+    setLineCount(yamlContent.split('\n').length);
+  }, [yamlContent]);
+
+  // Handle tab key in textarea
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Tab' && document.activeElement === editorRef.current) {
+        e.preventDefault();
+        const start = editorRef.current!.selectionStart;
+        const end = editorRef.current!.selectionEnd;
+        
+        // Insert tab at cursor position
+        const newValue = yamlContent.substring(0, start) + '  ' + yamlContent.substring(end);
+        setYamlContent(newValue);
+        
+        // Move cursor position after the inserted tab
+        setTimeout(() => {
+          editorRef.current!.selectionStart = editorRef.current!.selectionEnd = start + 2;
+        }, 0);
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [yamlContent]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -526,6 +558,9 @@ function YamlEditor({
     return <div className="p-4 text-center">Loading rule content...</div>;
   }
 
+  // Generate line numbers for editor
+  const lineNumbers = Array.from({ length: lineCount }, (_, i) => i + 1);
+
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
       {error && (
@@ -535,19 +570,67 @@ function YamlEditor({
       )}
       
       <div className="space-y-2">
-        <label className="text-sm font-medium">
-          Edit YAML Content
-          <span className="text-xs ml-2 text-gray-500">
-            (Make sure to follow proper YAML syntax)
-          </span>
-        </label>
-        <Textarea
-          value={yamlContent}
-          onChange={(e) => setYamlContent(e.target.value)}
-          className="font-mono text-sm min-h-[400px] resize-y"
-          placeholder="# Loading rule content..."
-          disabled={submitting}
-        />
+        <div className="flex justify-between items-center">
+          <label className="text-sm font-medium">
+            Edit YAML Content
+            <span className="text-xs ml-2 text-gray-500">
+              (Make sure to follow proper YAML syntax)
+            </span>
+          </label>
+          <div className="text-xs text-muted-foreground">
+            {lineCount} line{lineCount !== 1 ? 's' : ''}
+          </div>
+        </div>
+        
+        <div 
+          ref={editorContainerRef}
+          className="relative min-h-[400px] border rounded-md overflow-hidden bg-gray-900 shadow-sm"
+        >
+          {/* Line Numbers */}
+          <div className="absolute left-0 top-0 bottom-0 w-12 py-4 bg-gray-800 text-center overflow-hidden z-10 select-none border-r border-gray-700">
+            {lineNumbers.map(num => (
+              <div key={num} className="text-xs text-gray-400 leading-5 px-2">
+                {num}
+              </div>
+            ))}
+          </div>
+          
+          {/* Editor */}
+          <textarea
+            ref={editorRef}
+            value={yamlContent}
+            onChange={(e) => setYamlContent(e.target.value)}
+            className="font-mono text-sm min-h-[400px] w-full resize-y pl-14 pr-4 py-4 focus:outline-none focus:ring-1 focus:ring-blue-500 bg-gray-900 border-0 text-gray-100"
+            placeholder="# Enter YAML configuration here..."
+            disabled={submitting}
+            spellCheck={false}
+            style={{ 
+              lineHeight: '1.25rem',
+              tabSize: 2,
+              caretColor: '#e2e8f0'
+            }}
+          />
+          
+          {/* Syntax hint overlay (visual only) */}
+          <div className="absolute right-2 bottom-2 text-xs text-gray-400 px-2 py-1 bg-gray-800 rounded-sm opacity-80 pointer-events-none">
+            YAML
+          </div>
+        </div>
+        
+        <div className="flex justify-end gap-2 text-xs">
+          <div className="text-muted-foreground">
+            <span className="inline-block w-3 h-3 rounded-full bg-blue-400 mr-1"></span> Keys
+          </div>
+          <div className="text-muted-foreground">
+            <span className="inline-block w-3 h-3 rounded-full bg-green-400 mr-1"></span> Strings
+          </div>
+          <div className="text-muted-foreground">
+            <span className="inline-block w-3 h-3 rounded-full bg-amber-400 mr-1"></span> Numbers
+          </div>
+          <div className="text-muted-foreground">
+            <span className="inline-block w-3 h-3 rounded-full bg-purple-400 mr-1"></span> Booleans
+          </div>
+        </div>
       </div>
       
       <DialogFooter className="pt-2 border-t">
