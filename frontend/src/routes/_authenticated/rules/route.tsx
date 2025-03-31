@@ -63,6 +63,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
+import { Editor } from '@monaco-editor/react'
 
 // Rule form schema for validation
 const ruleFormSchema = z.object({
@@ -479,23 +480,41 @@ function YamlEditor({
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [lineCount, setLineCount] = useState(1);
-  const editorRef = useRef<HTMLTextAreaElement>(null);
-  const editorContainerRef = useRef<HTMLDivElement>(null);
 
   // Load the rule YAML when component mounts
   useEffect(() => {
     const fetchRuleYaml = async () => {
-      if (!rule || !rule.filename) return;
+      if (!rule || !rule.filename) {
+        // Set default template for new rules
+        setYamlContent(`name: "New Detection Rule"
+type: any
+index: "winlogbeat-*"
+
+run_every:
+  minutes: 1
+buffer_time:
+  minutes: 1
+
+filter:
+  - query:
+      query_string:
+        query: "your_query_here"
+
+alert:
+  - email
+
+alert_subject: "EDR Alert: Detection Rule Triggered"
+alert_text: "A potential security event has been detected."
+alert_text_type: plain`);
+        return;
+      }
       
       setLoading(true);
       setError(null);
       
       try {
-        // Get the raw YAML content
         const response = await rulesApi.getRuleYaml(rule.filename);
         setYamlContent(response.content || '');
-        setLineCount((response.content || '').split('\n').length);
       } catch (err) {
         console.error('Error fetching rule YAML:', err);
         setError('Failed to load rule YAML content');
@@ -507,41 +526,12 @@ function YamlEditor({
     fetchRuleYaml();
   }, [rule]);
 
-  // Update line count when content changes
-  useEffect(() => {
-    setLineCount(yamlContent.split('\n').length);
-  }, [yamlContent]);
-
-  // Handle tab key in textarea
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Tab' && document.activeElement === editorRef.current) {
-        e.preventDefault();
-        const start = editorRef.current!.selectionStart;
-        const end = editorRef.current!.selectionEnd;
-        
-        // Insert tab at cursor position
-        const newValue = yamlContent.substring(0, start) + '  ' + yamlContent.substring(end);
-        setYamlContent(newValue);
-        
-        // Move cursor position after the inserted tab
-        setTimeout(() => {
-          editorRef.current!.selectionStart = editorRef.current!.selectionEnd = start + 2;
-        }, 0);
-      }
-    };
-
-    document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [yamlContent]);
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
     setSubmitting(true);
     
     try {
-      // Submit the raw YAML content
       await onSubmit({ 
         filename: rule?.filename,
         yamlContent 
@@ -555,89 +545,67 @@ function YamlEditor({
   };
 
   if (loading) {
-    return <div className="p-4 text-center">Loading rule content...</div>;
+    return (
+      <div className="flex items-center justify-center p-8">
+        <div className="animate-spin h-8 w-8 border-4 border-primary border-t-transparent rounded-full"></div>
+      </div>
+    );
   }
-
-  // Generate line numbers for editor
-  const lineNumbers = Array.from({ length: lineCount }, (_, i) => i + 1);
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
       {error && (
-        <div className="bg-red-50 p-4 rounded border border-red-200 text-red-800">
+        <div className="bg-destructive/10 text-destructive px-4 py-2 rounded-md border border-destructive/20">
           {error}
         </div>
       )}
       
       <div className="space-y-2">
-        <div className="flex justify-between items-center">
-          <label className="text-sm font-medium">
-            Edit YAML Content
-            <span className="text-xs ml-2 text-gray-500">
-              (Make sure to follow proper YAML syntax)
-            </span>
-          </label>
-          <div className="text-xs text-muted-foreground">
-            {lineCount} line{lineCount !== 1 ? 's' : ''}
-          </div>
-        </div>
-        
-        <div 
-          ref={editorContainerRef}
-          className="relative min-h-[400px] border rounded-md overflow-hidden bg-gray-900 shadow-sm"
-        >
-          {/* Line Numbers */}
-          <div className="absolute left-0 top-0 bottom-0 w-12 py-4 bg-gray-800 text-center overflow-hidden z-10 select-none border-r border-gray-700">
-            {lineNumbers.map(num => (
-              <div key={num} className="text-xs text-gray-400 leading-5 px-2">
-                {num}
-              </div>
-            ))}
-          </div>
-          
-          {/* Editor */}
-          <textarea
-            ref={editorRef}
+        <div className="relative min-h-[500px] border rounded-md overflow-hidden">
+          <Editor
+            height="500px"
+            defaultLanguage="yaml"
             value={yamlContent}
-            onChange={(e) => setYamlContent(e.target.value)}
-            className="font-mono text-sm min-h-[400px] w-full resize-y pl-14 pr-4 py-4 focus:outline-none focus:ring-1 focus:ring-blue-500 bg-gray-900 border-0 text-gray-100"
-            placeholder="# Enter YAML configuration here..."
-            disabled={submitting}
-            spellCheck={false}
-            style={{ 
-              lineHeight: '1.25rem',
+            onChange={(value) => setYamlContent(value || '')}
+            theme="vs-dark"
+            options={{
+              minimap: { enabled: false },
+              fontSize: 13,
+              lineNumbers: 'on',
+              renderLineHighlight: 'all',
               tabSize: 2,
-              caretColor: '#e2e8f0'
+              insertSpaces: true,
+              formatOnPaste: true,
+              scrollBeyondLastLine: false,
+              automaticLayout: true,
+              wordWrap: 'on',
+              readOnly: submitting
             }}
           />
-          
-          {/* Syntax hint overlay (visual only) */}
-          <div className="absolute right-2 bottom-2 text-xs text-gray-400 px-2 py-1 bg-gray-800 rounded-sm opacity-80 pointer-events-none">
-            YAML
-          </div>
         </div>
         
-        <div className="flex justify-end gap-2 text-xs">
-          <div className="text-muted-foreground">
-            <span className="inline-block w-3 h-3 rounded-full bg-blue-400 mr-1"></span> Keys
-          </div>
-          <div className="text-muted-foreground">
-            <span className="inline-block w-3 h-3 rounded-full bg-green-400 mr-1"></span> Strings
-          </div>
-          <div className="text-muted-foreground">
-            <span className="inline-block w-3 h-3 rounded-full bg-amber-400 mr-1"></span> Numbers
-          </div>
-          <div className="text-muted-foreground">
-            <span className="inline-block w-3 h-3 rounded-full bg-purple-400 mr-1"></span> Booleans
+        <div className="text-xs text-muted-foreground mt-2 flex items-center gap-3">
+          <div className="flex items-center gap-1.5">
+            <kbd className="px-2 py-1 rounded bg-[#161b22] border border-[#21262d]/50 text-[#8b949e]">Tab</kbd>
+            <span>to indent</span>
           </div>
         </div>
       </div>
       
-      <DialogFooter className="pt-2 border-t">
-        <Button type="button" variant="outline" onClick={onCancel} disabled={submitting}>
+      <DialogFooter className="gap-2 pt-2 border-t">
+        <Button 
+          type="button" 
+          variant="outline" 
+          onClick={onCancel} 
+          disabled={submitting}
+        >
           Cancel
         </Button>
-        <Button type="submit" disabled={submitting}>
+        <Button 
+          type="submit" 
+          disabled={submitting}
+          className="min-w-[100px]"
+        >
           {submitting ? (
             <>
               <span className="animate-spin mr-2">⟳</span>
