@@ -15,4 +15,10 @@ export default defineConfig({
       '@tabler/icons-react': '@tabler/icons-react/dist/esm/icons/index.mjs',
     },
   },
+  server: {
+    allowedHosts: [
+      'edr.phannhat.id.vn',
+      'be.phannhat.id.vn'
+    ]
+  }
 })

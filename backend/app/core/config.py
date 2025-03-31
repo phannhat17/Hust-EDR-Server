@@ -15,5 +15,7 @@ config = {
     'elastalert_index': os.getenv('ELASTALERT_INDEX', 'elastalert_status'),
     'elastalert_rules_dir': os.getenv('ELASTALERT_RULES_DIR', 'elastalert_rules'),
     'elastalert_docker': os.getenv('ELASTALERT_DOCKER', 'true').lower() == 'true',
-    'elastalert_container': os.getenv('ELASTALERT_CONTAINER', 'elastalert')
-} 
+    'elastalert_container': os.getenv('ELASTALERT_CONTAINER', 'elastalert'),
+    'api_key': os.getenv('API_KEY', 'your-secret-api-key-here'),  # Default key for development
+    'api_key_header': 'X-API-Key'  # Header name for API key
+}

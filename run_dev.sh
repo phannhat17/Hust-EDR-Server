@@ -26,14 +26,14 @@ fi
 echo "Starting backend server..."
 cd backend
 source .venv/bin/activate
-flask run --host=0.0.0.0 --port=5000 &
+python wsgi.py &
 BACKEND_PID=$!
 cd ..
 
 # Start frontend
 echo "Starting frontend development server..."
 cd frontend
-npm run dev &
+npm run dev -- --host &
 FRONTEND_PID=$!
 cd ..
 

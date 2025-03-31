@@ -14,17 +14,14 @@ filter:
       query_string:
         query: 'file.hash.sha256 : 92804faaab2175dc501d73e814663058c78c0a042675a8937266357bcfb96c50 AND winlog.task : *FileCreateStreamHash*'
 
-# Alerter: discord
 alert:
   - discord
 
-# Cấu hình gửi Discord
-# Bạn cần webhook_url thật, dạng: https://discord.com/api/webhooks/<ID>/<TOKEN>
 discord_webhook_url: "https://discord.com/api/webhooks/1349386651637514320/gy8UKWZgtwIYHVmcycqmaAocMLRUu3mJFapw_3vLX5dG3_9PVAVvft4q50GWcYmafksW"
 discord_webhook_username: "ElastAlert Bot"
 discord_webhook_title: "Mimikatz File Found"
 discord_embed_color: 0xFF0000
-# Kiểu văn bản, dùng các placeholder {match[...]} để chèn giá trị từ log match
+
 alert_text_type: alert_text_only
 alert_text: |
   🚨 **Mimikatz detected!** 🚨
@@ -34,7 +31,6 @@ alert_text: |
   **SHA256 Hash**: {3}
   **Time**: {4}
 
-# Cung cấp danh sách các field để chèn vào {0}, {1}, ..., {6}
 alert_text_args:
   - host.hostname
   - user.name
