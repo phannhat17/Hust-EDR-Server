@@ -89,7 +89,7 @@ export default function Agents() {
                       <TableCell>{agent.os_info}</TableCell>
                       <TableCell>{agent.version}</TableCell>
                       <TableCell>
-                        <Badge variant={agent.status === 'active' ? "default" : "outline"}>
+                        <Badge variant={agent.status === 'active' ? "green" : "black"}>
                           {agent.status}
                         </Badge>
                       </TableCell>
