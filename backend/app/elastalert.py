@@ -151,18 +151,27 @@ class ElastAlertClient:
         """
         rules = []
         
+        logger.info(f"Looking for rule files in directory: {self.rules_dir}")
+        
         try:
-            for file_path in Path(self.rules_dir).glob('*.yaml'):
+            rule_files = list(Path(self.rules_dir).glob('*.yaml'))
+            logger.info(f"Found {len(rule_files)} rule files: {[f.name for f in rule_files]}")
+            
+            for file_path in rule_files:
                 try:
                     rule = self._read_rule_file(file_path)
                     rule['filename'] = file_path.name
                     rules.append(rule)
+                    logger.info(f"Successfully read rule file: {file_path.name}")
                 except Exception as e:
                     logger.error(f"Error reading rule file {file_path}: {e}")
                     continue
         except Exception as e:
             logger.error(f"Error listing rule files: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             
+        logger.info(f"Returning {len(rules)} rules")
         return rules
     
     def get_rule(self, filename):
@@ -176,15 +185,21 @@ class ElastAlertClient:
         """
         file_path = Path(self.rules_dir) / filename
         
+        logger.info(f"Looking for rule file: {file_path}")
+        
         if not file_path.exists():
+            logger.error(f"Rule file does not exist: {file_path}")
             return None
             
         try:
             rule = self._read_rule_file(file_path)
             rule['filename'] = filename
+            logger.info(f"Successfully read rule file: {filename}")
             return rule
         except Exception as e:
             logger.error(f"Error reading rule file {file_path}: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             return None
     
     def save_rule(self, rule_data):
@@ -268,10 +283,25 @@ class ElastAlertClient:
         Returns:
             dict: Rule object
         """
-        with open(file_path, 'r') as f:
-            rule = yaml.safe_load(f)
+        logger.info(f"Reading rule file: {file_path}")
+        try:
+            with open(file_path, 'r') as f:
+                content = f.read()
+                
+            logger.debug(f"Rule file content: {content[:100]}...")
+            rule = yaml.safe_load(content)
             
-        return rule
+            if not isinstance(rule, dict):
+                logger.error(f"Rule file does not contain a valid YAML dictionary: {file_path}")
+                raise ValueError(f"Invalid rule format in {file_path}")
+                
+            return rule
+        except yaml.YAMLError as e:
+            logger.error(f"YAML syntax error in rule file {file_path}: {e}")
+            raise
+        except Exception as e:
+            logger.error(f"Unexpected error reading rule file {file_path}: {e}")
+            raise
     
     def _generate_filename(self, rule_name):
         """Generate a filename from a rule name.

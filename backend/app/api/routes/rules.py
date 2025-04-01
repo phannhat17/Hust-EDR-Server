@@ -2,6 +2,7 @@ import os
 import yaml
 import logging
 from flask import Blueprint, jsonify, request, current_app
+from app.config.config import config
 
 # Set up logger
 logger = logging.getLogger(__name__)
@@ -14,7 +15,15 @@ def get_rules():
     """Get all ElastAlert rules."""
     elastalert_client = current_app.config['elastalert_client']
     rules = elastalert_client.get_rules()
-    return jsonify(rules)
+    
+    logger.info(f"Retrieved {len(rules)} rules")
+    
+    return jsonify({
+        'status': 'success',
+        'rules': rules,
+        'count': len(rules),
+        'rules_dir': elastalert_client.rules_dir
+    })
 
 @rules_bp.route('/rules/<filename>', methods=['GET'])
 def get_rule(filename):
@@ -23,27 +32,43 @@ def get_rule(filename):
     rule = elastalert_client.get_rule(filename)
     
     if rule:
-        return jsonify(rule)
+        logger.info(f"Retrieved rule: {filename}")
+        return jsonify({
+            'status': 'success',
+            'rule': rule,
+            'filename': filename
+        })
     else:
-        return jsonify({'error': 'Rule not found'}), 404
+        logger.error(f"Rule not found: {filename}")
+        return jsonify({
+            'status': 'error',
+            'error': 'Rule not found',
+            'filename': filename
+        }), 404
 
 @rules_bp.route('/rules/<filename>/yaml', methods=['GET'])
 def get_rule_yaml(filename):
     """Get a specific ElastAlert rule as raw YAML."""
     elastalert_client = current_app.config['elastalert_client']
-    config = current_app.config['elastalert_client'].config
-    rule_path = os.path.join(config['elastalert_rules_dir'], filename)
+    rules_dir = elastalert_client.rules_dir
+    rule_path = os.path.join(rules_dir, filename)
+    
+    logger.info(f"Attempting to read rule YAML from: {rule_path}")
     
     if not os.path.exists(rule_path):
-        return jsonify({'error': 'Rule not found'}), 404
+        logger.error(f"Rule file not found: {rule_path}")
+        return jsonify({"error": "Rule not found"}), 404
         
     try:
         with open(rule_path, 'r') as f:
             content = f.read()
-        return jsonify({'content': content})
+        logger.info(f"Successfully read rule YAML content for: {filename}")
+        
+        # Return only content in a simple object
+        return jsonify({"content": content})
     except Exception as e:
         logger.error(f"Error reading rule file {rule_path}: {e}")
-        return jsonify({'error': f'Error reading rule file: {e}'}), 500
+        return jsonify({"error": f"Error reading rule file: {str(e)}"}), 500
 
 @rules_bp.route('/rules', methods=['POST'])
 def create_rule():
@@ -66,7 +91,7 @@ def create_rule_from_yaml():
     """Create a new ElastAlert rule from raw YAML content."""
     data = request.json
     elastalert_client = current_app.config['elastalert_client']
-    config = elastalert_client.config
+    rules_dir = elastalert_client.rules_dir
     
     if not data or 'content' not in data:
         return jsonify({'error': 'No YAML content provided'}), 400
@@ -83,7 +108,7 @@ def create_rule_from_yaml():
         filename = f"{rule_name.lower().replace(' ', '_')}.yaml"
         
         # Write the YAML content to a new file
-        rule_path = os.path.join(config['elastalert_rules_dir'], filename)
+        rule_path = os.path.join(rules_dir, filename)
         
         # Check if file already exists
         if os.path.exists(rule_path):
@@ -93,10 +118,13 @@ def create_rule_from_yaml():
             f.write(data['content'])
             
         # Restart ElastAlert if running in Docker
-        if config.get('elastalert_docker', False):
+        if config.ELASTALERT_DOCKER:
             elastalert_client._restart_elastalert()
             
-        return jsonify({'message': 'Rule created successfully', 'filename': filename})
+        return jsonify({
+            'message': 'Rule created successfully', 
+            'filename': filename
+        })
     except yaml.YAMLError as e:
         return jsonify({'error': f'Invalid YAML syntax: {str(e)}'}), 400
     except Exception as e:
@@ -127,29 +155,50 @@ def update_rule_yaml(filename):
     """Update an existing ElastAlert rule with raw YAML content."""
     data = request.json
     elastalert_client = current_app.config['elastalert_client']
-    config = elastalert_client.config
+    rules_dir = elastalert_client.rules_dir
     
     if not data or 'content' not in data:
-        return jsonify({'error': 'No YAML content provided'}), 400
+        logger.error("No YAML content provided in request")
+        return jsonify({
+            'error': 'No YAML content provided'
+        }), 400
         
-    rule_path = os.path.join(config['elastalert_rules_dir'], filename)
+    rule_path = os.path.join(rules_dir, filename)
     
     if not os.path.exists(rule_path):
-        return jsonify({'error': 'Rule not found'}), 404
+        logger.error(f"Rule file not found: {rule_path}")
+        return jsonify({
+            'error': 'Rule not found'
+        }), 404
         
     try:
+        # Validate YAML syntax first
+        try:
+            yaml.safe_load(data['content'])
+        except yaml.YAMLError as ye:
+            logger.error(f"Invalid YAML syntax: {ye}")
+            return jsonify({
+                'error': f'Invalid YAML syntax: {str(ye)}'
+            }), 400
+            
         # Write the raw YAML content to the file
         with open(rule_path, 'w') as f:
             f.write(data['content'])
             
+        logger.info(f"Successfully updated rule YAML content for: {filename}")
+            
         # Restart ElastAlert if running in Docker
-        if config.get('elastalert_docker', False):
+        if config.ELASTALERT_DOCKER:
             elastalert_client._restart_elastalert()
             
-        return jsonify({'message': 'Rule YAML updated successfully'})
+        return jsonify({
+            'message': 'Rule YAML updated successfully'
+        })
     except Exception as e:
         logger.error(f"Error writing rule file {rule_path}: {e}")
-        return jsonify({'error': f'Error writing rule file: {e}'}), 500
+        return jsonify({
+            'error': f'Error writing rule file: {str(e)}'
+        }), 500
 
 @rules_bp.route('/rules/<filename>', methods=['DELETE'])
 def delete_rule(filename):

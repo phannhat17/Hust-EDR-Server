@@ -4,9 +4,13 @@ Unified configuration for the Flask application.
 
 import os
 from dotenv import load_dotenv
+from pathlib import Path
 
 # Load environment variables from .env file
 load_dotenv()
+
+# Get the base directory of the application
+BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
 class Config:
     """Base configuration for the application."""
@@ -30,7 +34,7 @@ class Config:
     
     # ElastAlert configuration
     ELASTALERT_INDEX = os.environ.get('ELASTALERT_INDEX', 'elastalert_status')
-    ELASTALERT_RULES_DIR = os.environ.get('ELASTALERT_RULES_DIR', 'elastalert_rules')
+    ELASTALERT_RULES_DIR = os.path.join(BASE_DIR, os.environ.get('ELASTALERT_RULES_DIR', 'elastalert_rules'))
     ELASTALERT_DOCKER = os.environ.get('ELASTALERT_DOCKER', 'true').lower() == 'true'
     ELASTALERT_CONTAINER = os.environ.get('ELASTALERT_CONTAINER', 'elastalert')
     

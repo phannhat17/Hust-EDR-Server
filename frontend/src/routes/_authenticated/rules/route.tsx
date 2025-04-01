@@ -514,7 +514,15 @@ alert_text_type: plain`);
       
       try {
         const response = await rulesApi.getRuleYaml(rule.filename);
-        setYamlContent(response.content || '');
+        console.log("YAML API Response:", response); // Debug log
+        
+        // Check if response has content property
+        if (response && response.content) {
+          setYamlContent(response.content);
+        } else {
+          console.error("Invalid response format:", response);
+          setError('Invalid response format from server');
+        }
       } catch (err) {
         console.error('Error fetching rule YAML:', err);
         setError('Failed to load rule YAML content');
@@ -631,10 +639,25 @@ function RulesPage() {
   const [activeFilter, setActiveFilter] = useState<string>('all');
 
   // Get all rules and filter on client-side
-  const { data: allRules = [], isLoading } = useQuery({
+  const { data, isLoading } = useQuery({
     queryKey: ['rules'],
-    queryFn: () => rulesApi.getRules(),
+    queryFn: async () => {
+      try {
+        const result = await rulesApi.getRules();
+        console.log("API Response for Rules:", result);
+        return result;
+      } catch (error) {
+        console.error("Error fetching rules:", error);
+        throw error;
+      }
+    },
   })
+
+  // Ensure rules data is properly structured as an array
+  const allRules = useMemo(() => {
+    // Extract rules array from the response or use empty array if not available
+    return (data && Array.isArray(data.rules)) ? data.rules : [];
+  }, [data]);
 
   // Enhanced filtering logic for rules based on selected filter
   const rules = useMemo(() => {
@@ -861,8 +884,8 @@ function RulesPage() {
             <CardTitle>Rule List</CardTitle>
             <CardDescription>
               {activeFilter !== 'all'
-                ? `Viewing ${activeFilter} rules (${rules.length})`
-                : `View and manage all ElastAlert rules (${rules.length})`}
+                ? `Viewing ${activeFilter} rules (${rules?.length || 0})`
+                : `View and manage all ElastAlert rules (${rules?.length || 0})`}
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -881,32 +904,38 @@ function RulesPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {rules.map((rule: Rule) => (
-                    <TableRow key={rule.filename}>
-                      <TableCell className="font-medium">{rule.name}</TableCell>
-                      <TableCell>{rule.type}</TableCell>
-                      <TableCell>{rule.index}</TableCell>
-                      <TableCell>
-                        <div className="flex gap-2">
-                          <Button 
-                            variant="outline" 
-                            size="icon"
-                            onClick={() => setSelectedRule(rule)}
-                          >
-                            <Edit className="h-4 w-4" />
-                          </Button>
-                          
-                          <Button 
-                            variant="outline" 
-                            size="icon" 
-                            onClick={() => openDeleteDialog(rule)}
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      </TableCell>
+                  {rules && rules.length > 0 ? (
+                    rules.map((rule: Rule) => (
+                      <TableRow key={rule.filename}>
+                        <TableCell className="font-medium">{rule.name}</TableCell>
+                        <TableCell>{rule.type}</TableCell>
+                        <TableCell>{rule.index}</TableCell>
+                        <TableCell>
+                          <div className="flex gap-2">
+                            <Button 
+                              variant="outline" 
+                              size="icon"
+                              onClick={() => setSelectedRule(rule)}
+                            >
+                              <Edit className="h-4 w-4" />
+                            </Button>
+                            
+                            <Button 
+                              variant="outline" 
+                              size="icon" 
+                              onClick={() => openDeleteDialog(rule)}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  ) : (
+                    <TableRow>
+                      <TableCell colSpan={4} className="text-center py-6">No rules found</TableCell>
                     </TableRow>
-                  ))}
+                  )}
                 </TableBody>
               </Table>
             )}
