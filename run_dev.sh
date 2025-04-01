@@ -26,7 +26,7 @@ fi
 echo "Starting backend server..."
 cd backend
 source .venv/bin/activate
-python wsgi.py &
+python server.py &
 BACKEND_PID=$!
 cd ..
 
