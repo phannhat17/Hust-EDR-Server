@@ -66,7 +66,7 @@ const MOCK_AGENTS = [
     ip_address: '192.168.1.103',
     os_info: 'Windows 10',
     version: '1.2.0',
-    status: 'active',
+    status: 'inactive',
     last_seen: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
     registered_at: new Date(Date.now() - 20 * 24 * 60 * 60 * 1000).toISOString(),
   },
