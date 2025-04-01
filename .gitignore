@@ -14,3 +14,9 @@ cacert.pem
 node_modules
 
 .next
+
+agent_pb2_grpc.py
+agent_pb2.py
+
+agent_grpc.pb.go
+agent.pb.go
