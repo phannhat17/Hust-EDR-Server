@@ -126,13 +126,13 @@ function AlertsPage() {
   const getStatusBadge = (status: string) => {
     switch (status) {
       case 'new':
-        return <Badge variant="default">New</Badge>
+        return <Badge variant="red">New</Badge>
       case 'in_progress':
-        return <Badge variant="outline">In Progress</Badge>
+        return <Badge variant="blue">In Progress</Badge>
       case 'resolved':
-        return <Badge variant="secondary">Resolved</Badge>
+        return <Badge variant="green">Resolved</Badge>
       case 'false_positive':
-        return <Badge variant="destructive">False Positive</Badge>
+        return <Badge variant="black">False Positive</Badge>
       default:
         return <Badge variant="secondary">{status}</Badge>
     }

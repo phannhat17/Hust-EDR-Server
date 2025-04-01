@@ -209,7 +209,7 @@ export default function Dashboard() {
                             <p className="text-sm text-muted-foreground">{agent.ip_address}</p>
                           </div>
                           <div className="ml-auto">
-                            <Badge variant={agent.status === 'active' ? "default" : "outline"}>
+                            <Badge variant={agent.status === 'active' ? "green" : "black"}>
                               {agent.status}
                             </Badge>
                           </div>
