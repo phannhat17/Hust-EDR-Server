@@ -1,0 +1,14 @@
+{
+  "939c9832-3df1-4c25-8da0-01bb66b0be5e": {
+    "agent_id": "939c9832-3df1-4c25-8da0-01bb66b0be5e",
+    "hostname": "f1rst-pc",
+    "ip_address": "192.168.126.10",
+    "mac_address": "0a:00:27:00:00:06",
+    "username": "F1RST-PC\\f1rst",
+    "os_version": "Microsoft Windows 11 Pro 10.0.26100.3476 Build 26100.3476 (build 10.0.26100.3476 Build 26100.3476)",
+    "agent_version": "1.0.0",
+    "registration_time": 1743519214,
+    "last_seen": 1743519222,
+    "status": "active"
+  }
+}

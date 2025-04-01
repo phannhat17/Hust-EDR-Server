@@ -1,3 +1,7 @@
+"""
+ElastAlert client for accessing alerts and rules from Elasticsearch.
+"""
+
 import os
 import json
 import yaml
@@ -6,41 +10,24 @@ import logging
 from datetime import datetime
 from pathlib import Path
 from elasticsearch import Elasticsearch
+from app.config.config import config
 
 logger = logging.getLogger(__name__)
 
 class ElastAlertClient:
-    def __init__(self, config):
-        """Initialize the ElastAlert client.
-        
-        Args:
-            config (dict): Configuration including Elasticsearch and ElastAlert settings
-        """
-        self.config = config
-        
+    def __init__(self):
+        """Initialize the ElastAlert client using the application config."""
         # Setup Elasticsearch client
-        es_config = {
-            'hosts': [f"{config['elasticsearch_host']}:{config['elasticsearch_port']}"]
-        }
-        
-        # Add authentication if provided
-        if config['elasticsearch_user'] and config['elasticsearch_password']:
-            es_config['http_auth'] = (
-                config['elasticsearch_user'],
-                config['elasticsearch_password']
-            )
-            
-        # Add SSL settings if enabled
-        if config['elasticsearch_use_ssl']:
-            es_config['use_ssl'] = True
-            es_config['verify_certs'] = True
-            es_config['ca_certs'] = config['elasticsearch_ca_path']
-            
-        self.es_client = Elasticsearch(**es_config)
+        try:
+            self.es_client = Elasticsearch(**config.get_elasticsearch_config())
+            logger.info(f"Connected to Elasticsearch at {config.ELASTICSEARCH_HOST}:{config.ELASTICSEARCH_PORT}")
+        except Exception as e:
+            logger.error(f"Failed to connect to Elasticsearch: {e}")
+            self.es_client = None
         
         # ElastAlert settings
-        self.alerts_index = config['elastalert_index']
-        self.rules_dir = config['elastalert_rules_dir']
+        self.alerts_index = config.ELASTALERT_INDEX
+        self.rules_dir = config.ELASTALERT_RULES_DIR
         
         # Ensure rules directory exists
         Path(self.rules_dir).mkdir(parents=True, exist_ok=True)
@@ -54,6 +41,11 @@ class ElastAlertClient:
         Returns:
             list: List of alerts
         """
+        # Return empty list if Elasticsearch is not connected
+        if not self.es_client:
+            logger.warning("Elasticsearch client not connected")
+            return []
+            
         # Simplify the query to get all documents
         query = {
             "query": {
@@ -118,6 +110,11 @@ class ElastAlertClient:
         Returns:
             bool: True if successful, False otherwise
         """
+        # Return false if Elasticsearch is not connected
+        if not self.es_client:
+            logger.warning("Elasticsearch client not connected")
+            return False
+            
         doc = {
             "edr_status": status,
             "edr_updated_at": datetime.now().isoformat()
@@ -228,7 +225,7 @@ class ElastAlertClient:
                 yaml.dump(rule_data, f, default_flow_style=False)
                 
             # Restart ElastAlert if running in Docker
-            if self.config.get('elastalert_docker', False):
+            if config.ELASTALERT_DOCKER:
                 self._restart_elastalert()
                 
             return True, filename
@@ -254,7 +251,7 @@ class ElastAlertClient:
             file_path.unlink()
             
             # Restart ElastAlert if running in Docker
-            if self.config.get('elastalert_docker', False):
+            if config.ELASTALERT_DOCKER:
                 self._restart_elastalert()
                 
             return True
@@ -298,10 +295,13 @@ class ElastAlertClient:
     def _restart_elastalert(self):
         """Restart the ElastAlert Docker container."""
         try:
-            container_name = self.config.get('elastalert_container', 'elastalert')
+            container_name = config.ELASTALERT_CONTAINER
             subprocess.run(['docker', 'restart', container_name], check=True)
             logger.info(f"Restarted ElastAlert container: {container_name}")
             return True
         except Exception as e:
             logger.error(f"Error restarting ElastAlert container: {e}")
-            return False 
+            return False
+
+# Create a singleton instance
+elastalert_client = ElastAlertClient() 
