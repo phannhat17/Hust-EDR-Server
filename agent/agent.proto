@@ -1,0 +1,56 @@
+syntax = "proto3";
+
+package edr;
+
+option go_package = "github.com/phannhat17/Hust-EDR-Server/agent/proto";
+
+// The EDR service definition
+service EDRService {
+  // Agent registration and heartbeat
+  rpc RegisterAgent(AgentInfo) returns (RegisterResponse) {}
+  
+  // Periodic status updates from agent
+  rpc UpdateStatus(AgentStatus) returns (StatusResponse) {}
+}
+
+// Information about the agent
+message AgentInfo {
+  string agent_id = 1;           // Unique identifier for the agent
+  string hostname = 2;           // System hostname
+  string ip_address = 3;         // Primary IP address
+  string mac_address = 4;        // MAC address
+  string username = 5;           // Current logged in user
+  string os_version = 6;         // OS version including build level
+  string agent_version = 7;      // Agent software version
+  int64 registration_time = 8;   // Unix timestamp of registration
+}
+
+// Status update from the agent
+message AgentStatus {
+  string agent_id = 1;           // Unique identifier for the agent
+  int64 timestamp = 2;           // Unix timestamp of status update
+  string status = 3;             // Status (ONLINE, BUSY, etc.)
+  SystemMetrics system_metrics = 4; // Basic system metrics
+}
+
+// Basic system metrics
+message SystemMetrics {
+  double cpu_usage = 1;          // CPU usage percentage
+  double memory_usage = 2;       // Memory usage percentage
+  int64 uptime = 3;              // System uptime in seconds
+}
+
+// Response to agent registration
+message RegisterResponse {
+  string server_message = 1;     // Message from server
+  bool success = 2;              // Success status
+  string assigned_id = 3;        // Server-assigned ID (if different)
+  int64 server_time = 4;         // Server timestamp
+}
+
+// Response to status update
+message StatusResponse {
+  string server_message = 1;     // Message from server
+  bool acknowledged = 2;         // Whether update was acknowledged
+  int64 server_time = 3;         // Server timestamp
+} 
