@@ -16,7 +16,7 @@ fi
 if [ ! -d "frontend/node_modules" ]; then
   echo "Installing frontend dependencies..."
   cd frontend
-  npm install
+  pnpm install
   cd ..
 else
   echo "Frontend dependencies already installed"
