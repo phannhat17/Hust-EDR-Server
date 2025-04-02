@@ -62,6 +62,5 @@ To integrate the agent with the server:
 
 ## Security
 
-- All communication is encrypted using TLS
 - The agent uses a machine-specific ID for authentication
 - For production use, consider implementing additional authentication mechanisms 

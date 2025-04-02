@@ -20,3 +20,9 @@ agent_pb2.py
 
 agent_grpc.pb.go
 agent.pb.go
+
+*.exe
+*.dll
+
+go.sum
+

@@ -69,22 +69,18 @@ A modern Endpoint Detection and Response (EDR) system with a beautiful React fro
 
 2. Install dependencies
    ```
-   npm install
-   # or
    pnpm install
    ```
 
-3. Configure environment variables in `.env` file
+3. Configure environment variables in `.env` file (copy from `.env.example`)
    ```
-   # Ensure that the API URL points to your backend
-   VITE_API_URL=http://localhost:5000
+   cp .env.example .env
+   # Edit .env file with your configuration
    ```
 
 4. Run the development server
    ```
-   npm run dev
-   # or
-   pnpm dev
+   npm run dev -- --host
    ```
 
 ## Development
