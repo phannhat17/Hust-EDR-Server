@@ -40,7 +40,7 @@ def get_dashboard_stats():
             try:
                 with open(agents_file, 'r') as f:
                     agents_data = json.load(f)
-                    active_agents = sum(1 for agent in agents_data.values() if agent.get('status') == 'active')
+                    active_agents = sum(1 for agent in agents_data.values() if agent.get('status') == 'ONLINE')
                     logger.info(f"Found {active_agents} active agents")
             except Exception as e:
                 logger.error(f"Error reading agents file: {str(e)}")
