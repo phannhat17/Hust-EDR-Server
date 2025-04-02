@@ -8,7 +8,7 @@ __pycache__
 
 .env
 
-elastalert
+elastalert_rules/
 cacert.pem
 
 node_modules
