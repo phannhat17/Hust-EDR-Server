@@ -80,21 +80,6 @@ class FileStorage:
             },
             {
                 'agent_id': str(uuid.uuid4()),
-                'hostname': 'linux-server-01',
-                'ip_address': '192.168.1.102',
-                'mac_address': '00:1A:2B:3C:4D:5F',
-                'username': 'root',
-                'os_version': 'Ubuntu 20.04 LTS',
-                'agent_version': '1.0.0',
-                'registration_time': int(time.time()) - 172800,  # 2 days ago
-                'last_seen': int(time.time()) - 7200,  # 2 hours ago
-                'status': 'ONLINE',
-                'cpu_usage': 78.5,
-                'memory_usage': 45.3,
-                'uptime': 604800  # 1 week
-            },
-            {
-                'agent_id': str(uuid.uuid4()),
                 'hostname': 'win-laptop-01',
                 'ip_address': '192.168.1.103',
                 'mac_address': '00:1A:2B:3C:4D:60',
