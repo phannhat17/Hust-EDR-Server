@@ -63,9 +63,15 @@ export interface Agent {
   hostname: string;
   ip_address: string;
   os_info: string;
+  os_version_full: string;
   version: string;
-  status: 'active' | 'inactive';
+  status: 'ONLINE' | 'OFFLINE';
   last_seen: string;
   registered_at: string;
+  mac_address?: string;
+  username?: string;
+  cpu_usage?: number;
+  memory_usage?: number;
+  uptime?: number;
   // Add any other fields that might be in the API response
 } 

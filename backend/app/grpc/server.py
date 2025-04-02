@@ -73,7 +73,7 @@ class FileStorage:
                 'agent_version': '1.0.0',
                 'registration_time': int(time.time()) - 86400,  # 1 day ago
                 'last_seen': int(time.time()) - 60,  # 1 minute ago
-                'status': 'active',
+                'status': 'ONLINE',
                 'cpu_usage': 45.2,
                 'memory_usage': 62.8,
                 'uptime': 259200  # 3 days
@@ -88,7 +88,7 @@ class FileStorage:
                 'agent_version': '1.0.0',
                 'registration_time': int(time.time()) - 172800,  # 2 days ago
                 'last_seen': int(time.time()) - 7200,  # 2 hours ago
-                'status': 'active',
+                'status': 'ONLINE',
                 'cpu_usage': 78.5,
                 'memory_usage': 45.3,
                 'uptime': 604800  # 1 week
@@ -103,7 +103,7 @@ class FileStorage:
                 'agent_version': '1.0.0',
                 'registration_time': int(time.time()) - 259200,  # 3 days ago
                 'last_seen': int(time.time()) - 86400,  # 1 day ago
-                'status': 'offline',
+                'status': 'OFFLINE',
                 'cpu_usage': 0,
                 'memory_usage': 0,
                 'uptime': 0
@@ -137,10 +137,40 @@ class EDRServicer(agent_pb2_grpc.EDRServiceServicer):
         logger.info(f"Registration Time: {request.registration_time}")
         logger.info("=============================")
         
+        agent_id = request.agent_id
+        hostname = request.hostname
+        
+        # Check if agent ID is empty, generate a new one
+        if not agent_id or agent_id == "":
+            agent_id = str(uuid.uuid4())
+            logger.info(f"Empty agent ID, generated new unique ID: {agent_id}")
+        elif agent_id in self.storage.agents:
+            # Agent ID exists, check if it's the same host trying to re-register
+            existing_agent = self.storage.agents[agent_id]
+            if existing_agent['hostname'] == hostname:
+                logger.info(f"Agent with ID {agent_id} and hostname {hostname} already registered, updating existing record")
+                # Use the existing agent ID, just update the data
+            else:
+                # Different hostname with same ID, generate a new ID
+                old_id = agent_id
+                agent_id = str(uuid.uuid4())
+                logger.info(f"Agent ID {old_id} exists but with different hostname. Generated new ID: {agent_id}")
+        
+        # Check for hostname collision with different agent ID
+        hostname_exists = False
+        for existing_id, agent_data in self.storage.agents.items():
+            if agent_data['hostname'] == hostname and existing_id != agent_id:
+                hostname_exists = True
+                logger.warning(f"Hostname {hostname} already registered with different agent ID {existing_id}")
+                break
+        
+        if hostname_exists:
+            logger.info(f"Hostname collision detected, but using provided/generated agent ID: {agent_id}")
+        
         # Prepare agent data
         agent_data = {
-            'agent_id': request.agent_id,
-            'hostname': request.hostname,
+            'agent_id': agent_id,
+            'hostname': hostname,
             'ip_address': request.ip_address,
             'mac_address': request.mac_address,
             'username': request.username,
@@ -148,17 +178,17 @@ class EDRServicer(agent_pb2_grpc.EDRServiceServicer):
             'agent_version': request.agent_version,
             'registration_time': request.registration_time,
             'last_seen': int(time.time()),
-            'status': 'active'
+            'status': 'ONLINE'
         }
         
         # Save agent data
-        self.storage.save_agent(request.agent_id, agent_data)
+        self.storage.save_agent(agent_id, agent_data)
         
         # Return response
         return agent_pb2.RegisterResponse(
             server_message="Registration successful",
             success=True,
-            assigned_id=request.agent_id,
+            assigned_id=agent_id,
             server_time=int(time.time())
         )
     
@@ -215,12 +245,14 @@ def start_grpc_server(port=None):
         port = config.GRPC_PORT
         
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
-    agent_pb2_grpc.add_EDRServiceServicer_to_server(EDRServicer(), server)
+    servicer = EDRServicer()
+    agent_pb2_grpc.add_EDRServiceServicer_to_server(servicer, server)
     
     # Listen on the specified port
     server.add_insecure_port(f'[::]:{port}')
     server.start()
     
     logger.info(f"EDR gRPC server started on port {port}")
+    logger.info(f"Agent information is stored at {servicer.storage.agents_file}")
     
     return server 

@@ -1,6 +1,8 @@
 import logging
 from flask import Blueprint, jsonify, request, current_app
 from datetime import datetime, timedelta
+import os
+import json
 
 # Set up logger
 logger = logging.getLogger(__name__)
@@ -29,8 +31,19 @@ def get_dashboard_stats():
         total_rules = len(rules)
         active_rules = sum(1 for rule in rules if not rule.get('is_disabled', False))
         
-        # For active agents, we'll just use a placeholder number since agent functionality is not implemented yet
+        # Get active agents count
         active_agents = 0
+        data_dir = os.path.join(current_app.root_path, '..', 'data')
+        agents_file = os.path.join(data_dir, 'agents.json')
+        
+        if os.path.exists(agents_file):
+            try:
+                with open(agents_file, 'r') as f:
+                    agents_data = json.load(f)
+                    active_agents = sum(1 for agent in agents_data.values() if agent.get('status') == 'active')
+                    logger.info(f"Found {active_agents} active agents")
+            except Exception as e:
+                logger.error(f"Error reading agents file: {str(e)}")
         
         stats = {
             'total_alerts': total_alerts,
@@ -164,12 +177,56 @@ def get_agent_stats():
     try:
         logger.info("Getting agent statistics")
         
-        # For now, we'll just return an empty list since agent functionality is not implemented yet
+        # Path to the agents.json file
+        data_dir = os.path.join(current_app.root_path, '..', 'data')
+        agents_file = os.path.join(data_dir, 'agents.json')
+        
+        if not os.path.exists(agents_file):
+            logger.warning(f"Agents file not found at {agents_file}")
+            return jsonify({'agents': []})
+        
+        with open(agents_file, 'r') as f:
+            agents_data = json.load(f)
+        
+        # Convert dictionary to list and add 'id' field for frontend compatibility
+        agents_list = []
+        for agent_id, agent in agents_data.items():
+            # Get the OS version and create a simplified version for the table
+            full_os_version = agent.get('os_version', 'Unknown')
+            simplified_os = full_os_version
+            
+            # For Windows, extract just the main version
+            if 'Windows' in full_os_version:
+                if 'Windows 10' in full_os_version:
+                    simplified_os = 'Windows 10'
+                    if 'Pro' in full_os_version:
+                        simplified_os += ' Pro'
+                    elif 'Home' in full_os_version:
+                        simplified_os += ' Home'
+                elif 'Windows 11' in full_os_version:
+                    simplified_os = 'Windows 11'
+                    if 'Pro' in full_os_version:
+                        simplified_os += ' Pro'
+                    elif 'Home' in full_os_version:
+                        simplified_os += ' Home'
+
+            agent_info = {
+                'id': agent_id,
+                'hostname': agent.get('hostname', 'Unknown'),
+                'ip_address': agent.get('ip_address', 'Unknown'),
+                'os_info': simplified_os,
+                'os_version_full': full_os_version,
+                'version': agent.get('agent_version', 'Unknown'),
+                'status': agent.get('status', 'Unknown'),
+                'last_seen': agent.get('last_seen', 0) * 1000,  # Convert to milliseconds for JS
+            }
+            agents_list.append(agent_info)
+        
         result = {
-            'agents': []
+            'agents': agents_list
         }
         
-        logger.info("Returning empty agent statistics (not implemented)")
+        logger.info(f"Found {len(agents_list)} agents for dashboard")
         return jsonify(result)
     except Exception as e:
         logger.error(f"Error in get_agent_stats endpoint: {str(e)}")

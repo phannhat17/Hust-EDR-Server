@@ -31,9 +31,10 @@ def create_app():
     from app.api.routes.alerts import alerts_bp
     from app.api.routes.dashboard import dashboard_bp
     from app.api.routes.rules import rules_bp
+    from app.api.routes.agents import agents_bp
     
     # Apply API key protection to all blueprints
-    for blueprint in [alerts_bp, dashboard_bp, rules_bp]:
+    for blueprint in [alerts_bp, dashboard_bp, rules_bp, agents_bp]:
         for endpoint, view_func in blueprint.view_functions.items():
             blueprint.view_functions[endpoint] = require_api_key(view_func)
     
@@ -41,6 +42,7 @@ def create_app():
     app.register_blueprint(alerts_bp)
     app.register_blueprint(dashboard_bp)
     app.register_blueprint(rules_bp)
+    app.register_blueprint(agents_bp)
 
     # Health check routes (no API key required)
     @app.route('/health', methods=['GET'])

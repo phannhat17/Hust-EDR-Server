@@ -24,8 +24,12 @@ import {
 import { Badge } from '@/components/ui/badge'
 import { Search } from '@/components/search'
 import { ThemeSwitch } from '@/components/theme-switch'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
+import { useState } from 'react'
 
 export default function Agents() {
+  const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null)
+  
   // No longer using searchQuery since it's not connected to UI
   const { data: agents = [], isLoading } = useQuery({
     queryKey: ['agents'],
@@ -89,13 +93,96 @@ export default function Agents() {
                       <TableCell>{agent.os_info}</TableCell>
                       <TableCell>{agent.version}</TableCell>
                       <TableCell>
-                        <Badge variant={agent.status === 'active' ? "green" : "black"}>
+                        <Badge variant={agent.status === 'ONLINE' ? "green" : "black"}>
                           {agent.status}
                         </Badge>
                       </TableCell>
                       <TableCell>{new Date(agent.last_seen).toLocaleString()}</TableCell>
                       <TableCell>
-                        <Button variant="outline" size="sm">Details</Button>
+                        <Dialog>
+                          <DialogTrigger asChild>
+                            <Button 
+                              variant="outline" 
+                              size="sm"
+                              onClick={() => setSelectedAgent(agent)}
+                            >
+                              Details
+                            </Button>
+                          </DialogTrigger>
+                          <DialogContent className="sm:max-w-md">
+                            <DialogHeader>
+                              <DialogTitle>Agent Details</DialogTitle>
+                            </DialogHeader>
+                            {selectedAgent && (
+                              <div className="grid gap-4">
+                                <div className="grid grid-cols-2 gap-4">
+                                  <div className="space-y-1">
+                                    <h4 className="font-medium text-sm">Hostname</h4>
+                                    <p className="text-sm">{selectedAgent.hostname}</p>
+                                  </div>
+                                  <div className="space-y-1">
+                                    <h4 className="font-medium text-sm">IP Address</h4>
+                                    <p className="text-sm">{selectedAgent.ip_address}</p>
+                                  </div>
+                                </div>
+                                <div className="space-y-1">
+                                  <h4 className="font-medium text-sm">Operating System</h4>
+                                  <p className="text-sm">{selectedAgent.os_version_full}</p>
+                                </div>
+                                <div className="grid grid-cols-2 gap-4">
+                                  <div className="space-y-1">
+                                    <h4 className="font-medium text-sm">MAC Address</h4>
+                                    <p className="text-sm">{selectedAgent.mac_address || 'Not available'}</p>
+                                  </div>
+                                  <div className="space-y-1">
+                                    <h4 className="font-medium text-sm">Username</h4>
+                                    <p className="text-sm">{selectedAgent.username || 'Not available'}</p>
+                                  </div>
+                                </div>
+                                <div className="grid grid-cols-3 gap-4">
+                                  <div className="space-y-1">
+                                    <h4 className="font-medium text-sm">CPU Usage</h4>
+                                    <p className="text-sm">{selectedAgent.cpu_usage !== undefined ? `${selectedAgent.cpu_usage.toFixed(1)}%` : 'N/A'}</p>
+                                  </div>
+                                  <div className="space-y-1">
+                                    <h4 className="font-medium text-sm">Memory Usage</h4>
+                                    <p className="text-sm">{selectedAgent.memory_usage !== undefined ? `${selectedAgent.memory_usage.toFixed(1)}%` : 'N/A'}</p>
+                                  </div>
+                                  <div className="space-y-1">
+                                    <h4 className="font-medium text-sm">Uptime</h4>
+                                    <p className="text-sm">
+                                      {selectedAgent.uptime !== undefined 
+                                        ? formatUptime(selectedAgent.uptime) 
+                                        : 'N/A'}
+                                    </p>
+                                  </div>
+                                </div>
+                                <div className="grid grid-cols-3 gap-4">
+                                  <div className="space-y-1">
+                                    <h4 className="font-medium text-sm">Status</h4>
+                                    <p className="text-sm">
+                                      <Badge variant={selectedAgent.status === 'ONLINE' ? "green" : "black"}>
+                                        {selectedAgent.status}
+                                      </Badge>
+                                    </p>
+                                  </div>
+                                  <div className="space-y-1">
+                                    <h4 className="font-medium text-sm">Agent Version</h4>
+                                    <p className="text-sm">{selectedAgent.version}</p>
+                                  </div>
+                                  <div className="space-y-1">
+                                    <h4 className="font-medium text-sm">Registered</h4>
+                                    <p className="text-sm">{new Date(selectedAgent.registered_at).toLocaleString()}</p>
+                                  </div>
+                                </div>
+                                <div className="space-y-1">
+                                  <h4 className="font-medium text-sm">Last Seen</h4>
+                                  <p className="text-sm">{new Date(selectedAgent.last_seen).toLocaleString()}</p>
+                                </div>
+                              </div>
+                            )}
+                          </DialogContent>
+                        </Dialog>
                       </TableCell>
                     </TableRow>
                   ))}
@@ -107,6 +194,23 @@ export default function Agents() {
       </Main>
     </>
   )
+}
+
+// Helper function to format uptime in a human-readable format
+function formatUptime(seconds: number): string {
+  if (seconds < 60) {
+    return `${seconds} seconds`;
+  } else if (seconds < 3600) {
+    return `${Math.floor(seconds / 60)} minutes`;
+  } else if (seconds < 86400) { // less than a day
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    return `${hours} ${hours === 1 ? 'hour' : 'hours'} ${minutes} ${minutes === 1 ? 'minute' : 'minutes'}`;
+  } else {
+    const days = Math.floor(seconds / 86400);
+    const hours = Math.floor((seconds % 86400) / 3600);
+    return `${days} ${days === 1 ? 'day' : 'days'} ${hours} ${hours === 1 ? 'hour' : 'hours'}`;
+  }
 }
 
 const topNav = [
