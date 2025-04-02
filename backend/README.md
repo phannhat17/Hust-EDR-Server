@@ -83,5 +83,3 @@ backend/
 ├── server.py              # Main entry point
 └── requirements.txt       # Python dependencies
 ```
-
-python -m grpc_tools.protoc -I../agent/proto --python_out=. --grpc_python_out=. ../agent/proto/agent.proto

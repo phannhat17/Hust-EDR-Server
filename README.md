@@ -11,6 +11,9 @@ A modern Endpoint Detection and Response (EDR) system with a beautiful React fro
 
 ## Project Structure
 
+- `agent/`: EDR agent
+   - Updating
+
 - `backend/`: Flask API server
   - Connects to Elasticsearch for alerts and rule management
   - Manages ElastAlert rules and configuration
@@ -27,9 +30,11 @@ A modern Endpoint Detection and Response (EDR) system with a beautiful React fro
 ### Prerequisites
 
 - Python 3.8+
-- Node.js 16+ and npm/pnpm
+- Docker compose
+- Node.js 16+ and npm & pnpm
 - Elasticsearch instance
 - ElastAlert container (optional, for rule execution)
+- Go lang for agent compile or you can use the prebuilt executable available in the Releases section.
 
 ### Backend Setup
 
@@ -49,15 +54,38 @@ A modern Endpoint Detection and Response (EDR) system with a beautiful React fro
    pip install -r requirements.txt
    ```
 
-4. Configure environment variables in `.env` file (copy from `.env.example`)
+4. Compile proto for python gRPC
+   ```
+   python -m grpc_tools.protoc -I../agent/proto --python_out=./app/grpc --grpc_python_out=./app/grpc ../agent/proto/agent.proto
+   ```
+   Then You need to modify the import line in the generated `backend/app/grpc/agent_pb2_grpc.py` file from:
+   ```
+   import agent_pb2 as agent__pb2
+   ```
+   To
+   ```
+   from . import agent_pb2 as agent__pb2
+   ```
+   This is necessary because the file is used within a Python package and requires a relative import.
+   Or you can use this command with the current directory is `backend`
+   ```
+   sed -i 's/import agent_pb2 as agent__pb2/from . import agent_pb2 as agent__pb2/' ./app/grpc/agent_pb2_grpc.py
+   ```
+
+
+5. Configure environment variables in `.env` file (copy from `.env.example`)
    ```
    cp .env.example .env
    # Edit .env file with your configuration
    ```
+   If your Elasticsearch instance uses a self-signed SSL certificate (which is the default for new Elasticsearch instances), you will need to manually copy that certificate into `backend/cacert.pem` file.
 
-5. Run the Flask development server
+   > If you follow the default Elasticsearch installation method on Ubuntu, the certificate will be located at `/etc/elasticsearch/certs/http_ca.crt`
+
+
+6. Run the Flask development server
    ```
-   flask run
+   python server.py
    ```
 
 ### Frontend Setup
@@ -81,35 +109,7 @@ A modern Endpoint Detection and Response (EDR) system with a beautiful React fro
 4. Run the development server
    ```
    npm run dev -- --host
-   ```
-
-## Development
-
-For easier development, you can use the provided development script to start both frontend and backend:
-
-```
-./run_dev.sh
-```
-
-This script will:
-1. Set up Python virtual environment if it doesn't exist
-2. Install frontend dependencies if they don't exist
-3. Start backend server on port 5000
-4. Start frontend development server
-5. Allow graceful shutdown of both with Ctrl+C
-
-## API Documentation
-
-The backend provides the following API endpoints:
-
-- `GET /api/alerts`: Retrieve alerts from ElastAlert
-- `PUT /api/alerts/<alert_id>`: Update an alert's status
-- `GET /api/rules`: Get all ElastAlert rules
-- `GET /api/rules/<filename>`: Get a specific rule
-- `POST /api/rules`: Create a new rule
-- `PUT /api/rules/<filename>`: Update an existing rule
-- `DELETE /api/rules/<filename>`: Delete a rule
-- `POST /api/elastalert/restart`: Restart the ElastAlert container
+   ``` 
 
 ## License
 
