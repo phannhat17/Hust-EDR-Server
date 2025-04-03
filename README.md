@@ -88,6 +88,8 @@ A modern Endpoint Detection and Response (EDR) system with a beautiful React fro
    python server.py
    ```
 
+> **Security Note**: The frontend is currently making direct API calls from the browser, which may lead to CORS policy violations and prevent successful communication with the backend. As a temporary workaround, CORS has been disabled to allow these requests. This will be addressed and properly configured in future versions (hopefully 😅).
+
 ### Frontend Setup
 
 1. Navigate to the frontend directory
