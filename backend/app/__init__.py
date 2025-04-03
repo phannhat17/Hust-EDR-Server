@@ -4,10 +4,9 @@ Flask application factory.
 
 import os
 import logging
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request
 from flask_cors import CORS
 from app.config.config import config
-from app.core.auth import require_api_key
 from app.elastalert import elastalert_client
 
 # Set up logging
@@ -33,11 +32,6 @@ def create_app():
     from app.api.routes.rules import rules_bp
     from app.api.routes.agents import agents_bp
     
-    # Apply API key protection to all blueprints
-    for blueprint in [alerts_bp, dashboard_bp, rules_bp, agents_bp]:
-        for endpoint, view_func in blueprint.view_functions.items():
-            blueprint.view_functions[endpoint] = require_api_key(view_func)
-    
     # Register blueprints
     app.register_blueprint(alerts_bp)
     app.register_blueprint(dashboard_bp)
@@ -49,6 +43,23 @@ def create_app():
     @app.route('/', methods=['GET'])
     def health_check():
         return jsonify({'status': 'healthy'})
+    
+    # Add a before_request handler to ensure API key authentication for all /api routes
+    @app.before_request
+    def verify_api_key():
+        # Skip health check routes and OPTIONS requests (for CORS)
+        if request.path in ['/', '/health'] or request.method == 'OPTIONS':
+            return None
+            
+        # Check if path starts with /api
+        if request.path.startswith('/api'):
+            api_key = request.headers.get(config.API_KEY_HEADER)
+            logger.info(f"Before request handler checking API key for {request.path}")
+            
+            # If API key is invalid, return 401 immediately
+            if api_key != config.API_KEY:
+                logger.warning(f"Invalid API key in before_request handler: {api_key}")
+                return jsonify({"error": "Invalid API key"}), 401
     
     # Start gRPC server
     from app.grpc.server import start_grpc_server
