@@ -6,12 +6,14 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
 	"agent/client"
 	"agent/collector"
 	"agent/config"
+	pb "agent/proto"
 )
 
 var (
@@ -37,7 +39,7 @@ func main() {
 	sysCollector := collector.NewSystemCollector()
 	
 	// Initialize gRPC client
-	client, err := client.NewClient(cfg)
+	edrClient, err := client.NewClient(cfg)
 	if err != nil {
 		log.Fatalf("Failed to create client: %v", err)
 	}
@@ -52,7 +54,7 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	
-	response, err := client.RegisterAgent(ctx, info)
+	response, err := edrClient.RegisterAgent(ctx, info)
 	if err != nil {
 		log.Fatalf("Failed to register agent: %v", err)
 	}
@@ -65,19 +67,55 @@ func main() {
 		info.AgentId = response.AssignedId
 	}
 
-	// Start periodic status updates
-	ticker := time.NewTicker(cfg.UpdateInterval)
-	defer ticker.Stop()
+	// Initialize command handler
+	cmdHandler := client.NewCommandHandler(edrClient)
+
+	// Start periodic status updates in a separate goroutine
+	var wg sync.WaitGroup
+	wg.Add(2)  // One for status updates, one for command handling
 
 	// Handle graceful shutdown
 	shutdown := make(chan os.Signal, 1)
 	signal.Notify(shutdown, syscall.SIGINT, syscall.SIGTERM)
+	
+	// Channel to communicate shutdown to goroutines
+	done := make(chan struct{})
+
+	// Start status update goroutine
+	go func() {
+		defer wg.Done()
+		statusUpdater(edrClient, sysCollector, info.AgentId, cfg.UpdateInterval, done)
+	}()
+
+	// Start command handling goroutine
+	go func() {
+		defer wg.Done()
+		commandHandler(edrClient, cmdHandler, info.AgentId, done)
+	}()
+
+	// Wait for shutdown signal
+	<-shutdown
+	log.Println("Shutting down agent...")
+	
+	// Signal goroutines to shut down
+	close(done)
+
+	// Wait for goroutines to complete
+	wg.Wait()
+	
+	log.Println("Agent shutdown complete")
+}
+
+// statusUpdater periodically sends status updates to the server
+func statusUpdater(client *client.EDRClient, collector *collector.SystemCollector, agentID string, interval time.Duration, done <-chan struct{}) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
 
 	for {
 		select {
 		case <-ticker.C:
 			// Collect current status
-			status, err := sysCollector.CollectAgentStatus(info.AgentId)
+			status, err := collector.CollectAgentStatus(agentID)
 			if err != nil {
 				log.Printf("Error collecting status: %v", err)
 				continue
@@ -94,10 +132,111 @@ func main() {
 				log.Printf("Status update sent. Acknowledged: %v", statusResp.Acknowledged)
 			}
 
-		case <-shutdown:
-			log.Println("Shutting down agent...")
-			// Perform any cleanup
+		case <-done:
+			log.Println("Status updater shutting down")
 			return
+		}
+	}
+}
+
+// commandHandler listens for commands from the server and executes them
+func commandHandler(client *client.EDRClient, handler *client.CommandHandler, agentID string, done <-chan struct{}) {
+	log.Println("Starting command handler")
+	
+	// Track last command time to avoid reprocessing commands
+	var lastCommandTime int64 = 0
+	
+	// Backoff for reconnections
+	backoff := time.Second
+	maxBackoff := 1 * time.Minute
+	
+	for {
+		select {
+		case <-done:
+			log.Println("Command handler shutting down")
+			return
+		default:
+			// Create a background context with cancel for the stream
+			ctx, cancel := context.WithCancel(context.Background())
+			
+			// Set up a goroutine to cancel the context when done
+			go func() {
+				select {
+				case <-done:
+					cancel()
+				case <-ctx.Done():
+					// Context is already done
+				}
+			}()
+			
+			// Establish command stream
+			stream, err := client.ReceiveCommands(ctx, agentID, lastCommandTime)
+			if err != nil {
+				log.Printf("Failed to establish command stream: %v. Retrying in %v...", err, backoff)
+				cancel()
+				select {
+				case <-time.After(backoff):
+					// Exponential backoff with jitter
+					backoff = time.Duration(float64(backoff) * 1.5)
+					if backoff > maxBackoff {
+						backoff = maxBackoff
+					}
+				case <-done:
+					return
+				}
+				continue
+			}
+			
+			// Reset backoff on successful connection
+			backoff = time.Second
+			
+			// Process command stream
+			for {
+				select {
+				case <-done:
+					cancel()
+					return
+				default:
+					// Receive next command
+					cmd, err := stream.Recv()
+					if err != nil {
+						log.Printf("Command stream error: %v. Reconnecting...", err)
+						cancel()
+						break
+					}
+					
+					// Process command if newer than last one
+					if cmd.Timestamp > lastCommandTime {
+						log.Printf("Received command: %s (Type: %s)", cmd.CommandId, cmd.Type.String())
+						
+						// Update last command time
+						lastCommandTime = cmd.Timestamp
+						
+						// Handle command asynchronously
+						go func(command *pb.Command) {
+							// Create context with timeout for command execution
+							cmdCtx, cmdCancel := context.WithTimeout(context.Background(), 
+								time.Duration(command.Timeout)*time.Second)
+							defer cmdCancel()
+							
+							// Process command
+							result := handler.HandleCommand(cmdCtx, command)
+							
+							// Report result back to server
+							reportCtx, reportCancel := context.WithTimeout(context.Background(), 5*time.Second)
+							_, err := client.ReportCommandResult(reportCtx, result)
+							reportCancel()
+							
+							if err != nil {
+								log.Printf("Failed to report command result: %v", err)
+							}
+						}(cmd)
+					} else {
+						log.Printf("Ignoring old command: %s (Timestamp: %d, Last: %d)",
+							cmd.CommandId, cmd.Timestamp, lastCommandTime)
+					}
+				}
+			}
 		}
 	}
 } 

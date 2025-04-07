@@ -93,4 +93,35 @@ func (c *EDRClient) UpdateStatus(ctx context.Context, status *pb.AgentStatus) (*
 	}
 	log.Printf("Status update successful: %s", response.ServerMessage)
 	return response, nil
+}
+
+// ReceiveCommands establishes a stream to receive commands from the server
+func (c *EDRClient) ReceiveCommands(ctx context.Context, agentID string, lastCommandTime int64) (pb.EDRService_ReceiveCommandsClient, error) {
+	log.Printf("Establishing command stream for agent %s...", agentID)
+	
+	request := &pb.CommandRequest{
+		AgentId:         agentID,
+		LastCommandTime: lastCommandTime,
+	}
+	
+	stream, err := c.client.ReceiveCommands(ctx, request)
+	if err != nil {
+		return nil, fmt.Errorf("failed to establish command stream: %v", err)
+	}
+	
+	log.Printf("Command stream established for agent %s", agentID)
+	return stream, nil
+}
+
+// ReportCommandResult sends the result of a command execution back to the server
+func (c *EDRClient) ReportCommandResult(ctx context.Context, result *pb.CommandResult) (*pb.CommandAck, error) {
+	log.Printf("Reporting command result for command %s...", result.CommandId)
+	
+	response, err := c.client.ReportCommandResult(ctx, result)
+	if err != nil {
+		return nil, fmt.Errorf("failed to report command result: %v", err)
+	}
+	
+	log.Printf("Command result reported successfully: %s", response.Message)
+	return response, nil
 } 

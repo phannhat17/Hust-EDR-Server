@@ -11,6 +11,12 @@ service EDRService {
   
   // Periodic status updates from agent
   rpc UpdateStatus(AgentStatus) returns (StatusResponse) {}
+  
+  // Command execution stream from server to agent
+  rpc ReceiveCommands(CommandRequest) returns (stream Command) {}
+  
+  // Command result reporting from agent to server
+  rpc ReportCommandResult(CommandResult) returns (CommandAck) {}
 }
 
 // Information about the agent
@@ -53,4 +59,50 @@ message StatusResponse {
   string server_message = 1;     // Message from server
   bool acknowledged = 2;         // Whether update was acknowledged
   int64 server_time = 3;         // Server timestamp
+}
+
+// Command request from agent to receive commands
+message CommandRequest {
+  string agent_id = 1;           // Unique identifier for the agent
+  int64 last_command_time = 2;   // Last command timestamp processed
+}
+
+// Command from server to agent
+message Command {
+  string command_id = 1;         // Unique command identifier
+  string agent_id = 2;           // Target agent ID
+  int64 timestamp = 3;           // Command issue timestamp
+  CommandType type = 4;          // Type of command
+  map<string, string> params = 5; // Command parameters
+  int32 priority = 6;            // Command priority (higher = more urgent)
+  int64 timeout = 7;             // Command timeout in seconds
+}
+
+// Command execution result
+message CommandResult {
+  string command_id = 1;         // Command ID this result is for
+  string agent_id = 2;           // Agent ID that executed the command
+  bool success = 3;              // Whether command succeeded
+  string message = 4;            // Result message or error details
+  int64 execution_time = 5;      // Unix timestamp of execution
+  int64 duration_ms = 6;         // Execution duration in milliseconds
+}
+
+// Command acknowledgment from server
+message CommandAck {
+  string command_id = 1;         // Command ID being acknowledged
+  bool received = 2;             // Whether server received the result
+  string message = 3;            // Optional server message
+}
+
+// Command types enum
+enum CommandType {
+  UNKNOWN = 0;
+  DELETE_FILE = 1;
+  KILL_PROCESS = 2;
+  KILL_PROCESS_TREE = 3;
+  BLOCK_IP = 4;
+  BLOCK_URL = 5;
+  NETWORK_ISOLATE = 6;
+  NETWORK_RESTORE = 7;
 } 
