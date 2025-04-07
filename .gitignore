@@ -27,3 +27,5 @@ agent.pb.go
 go.sum
 
 agents.json
+commands.json
+command_results.json
