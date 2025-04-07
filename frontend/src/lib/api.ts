@@ -180,13 +180,8 @@ export const rulesApi = {
 // Agents API functions
 export const agentsApi = {
   getAgents: async () => {
-    try {
-      const response = await api.get('/api/agents')
-      return response.data
-    } catch (error) {
-      console.warn('Error fetching agents, using mock data:', error)
-      return MOCK_AGENTS
-    }
+    const response = await api.get('/api/agents')
+    return response.data
   },
   
   registerAgent: async (agentData: any) => {

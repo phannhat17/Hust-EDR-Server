@@ -119,6 +119,19 @@ def send_command():
         if command_type == 0:  # UNKNOWN
             return jsonify({"error": "Invalid command type"}), 400
         
+        # Verify the agent exists
+        data_dir = os.path.join(current_app.root_path, '..', 'data')
+        agents_file = os.path.join(data_dir, 'agents.json')
+        
+        if not os.path.exists(agents_file):
+            return jsonify({"error": "No agents are registered"}), 400
+            
+        with open(agents_file, 'r') as f:
+            agents_data = json.load(f)
+            
+        if agent_id not in agents_data:
+            return jsonify({"error": f"Agent with ID {agent_id} does not exist"}), 404
+            
         # Create client
         client = create_grpc_client()
         

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -9,11 +9,13 @@ import { Badge } from '@/components/ui/badge';
 import { AgentSelector } from '@/components/agent-selector';
 import { CommandForm } from './command-form';
 import { formatDistanceToNow } from 'date-fns';
-import { apiClient } from '@/lib/api/client';
+import { useRouter, useSearch } from '@tanstack/react-router';
 
 export default function Commands() {
   const [selectedTab, setSelectedTab] = useState('send');
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
+  const { agent_id } = useSearch({ from: '/_authenticated/commands/' });
+  const router = useRouter();
 
   // Fetch command history
   const { data: commands, isLoading, error, refetch } = useQuery({
@@ -30,9 +32,28 @@ export default function Commands() {
     },
   });
 
+  // Set agent from URL parameters if provided
+  useEffect(() => {
+    if (agent_id) {
+      setSelectedAgentId(agent_id);
+      setSelectedTab('send');
+    }
+  }, [agent_id]);
+
   // Handle agent selection
   const handleAgentChange = (agentId: string) => {
     setSelectedAgentId(agentId);
+    
+    // Update URL with selected agent
+    if (agentId) {
+      router.navigate({
+        to: '/commands',
+        search: {
+          agent_id: agentId
+        },
+        replace: true
+      });
+    }
   };
 
   return (
@@ -59,7 +80,7 @@ export default function Commands() {
             <CardContent>
               <div className="mb-6">
                 <label className="text-sm font-medium">Select Agent</label>
-                <AgentSelector onAgentChange={handleAgentChange} />
+                <AgentSelector onAgentChange={handleAgentChange} selectedAgentId={selectedAgentId || undefined} />
               </div>
               
               {selectedAgentId ? (

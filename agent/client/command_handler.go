@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -29,6 +30,11 @@ func NewCommandHandler(client *EDRClient) *CommandHandler {
 func (h *CommandHandler) HandleCommand(ctx context.Context, cmd *pb.Command) *pb.CommandResult {
 	startTime := time.Now()
 	
+	// Add more detailed logging about the incoming command
+	log.Printf("DEBUG: HandleCommand received command - ID: %s, Type: %d (%s)", 
+		cmd.CommandId, cmd.Type, cmd.Type.String())
+	log.Printf("DEBUG: Command params dump: %+v", cmd.Params)
+	
 	result := &pb.CommandResult{
 		CommandId:     cmd.CommandId,
 		AgentId:       cmd.AgentId,
@@ -45,20 +51,28 @@ func (h *CommandHandler) HandleCommand(ctx context.Context, cmd *pb.Command) *pb
 	// Execute command based on type
 	switch cmd.Type {
 	case pb.CommandType_DELETE_FILE:
+		log.Printf("DEBUG: Matched DELETE_FILE type (value: %d), calling handleDeleteFile", int(pb.CommandType_DELETE_FILE))
 		message, err = h.handleDeleteFile(cmd.Params)
 	case pb.CommandType_KILL_PROCESS:
+		log.Printf("DEBUG: Matched KILL_PROCESS type (value: %d)", int(pb.CommandType_KILL_PROCESS))
 		message, err = h.handleKillProcess(cmd.Params)
 	case pb.CommandType_KILL_PROCESS_TREE:
+		log.Printf("DEBUG: Matched KILL_PROCESS_TREE type (value: %d)", int(pb.CommandType_KILL_PROCESS_TREE))
 		message, err = h.handleKillProcessTree(cmd.Params)
 	case pb.CommandType_BLOCK_IP:
+		log.Printf("DEBUG: Matched BLOCK_IP type (value: %d)", int(pb.CommandType_BLOCK_IP))
 		message, err = h.handleBlockIP(cmd.Params)
 	case pb.CommandType_BLOCK_URL:
+		log.Printf("DEBUG: Matched BLOCK_URL type (value: %d)", int(pb.CommandType_BLOCK_URL))
 		message, err = h.handleBlockURL(cmd.Params)
 	case pb.CommandType_NETWORK_ISOLATE:
+		log.Printf("DEBUG: Matched NETWORK_ISOLATE type (value: %d)", int(pb.CommandType_NETWORK_ISOLATE))
 		message, err = h.handleNetworkIsolate(cmd.Params)
 	case pb.CommandType_NETWORK_RESTORE:
+		log.Printf("DEBUG: Matched NETWORK_RESTORE type (value: %d)", int(pb.CommandType_NETWORK_RESTORE))
 		message, err = h.handleNetworkRestore(cmd.Params)
 	default:
+		log.Printf("ERROR: Unknown command type: %d (%s)", int(cmd.Type), cmd.Type.String())
 		err = fmt.Errorf("unknown command type: %s", cmd.Type.String())
 	}
 
@@ -82,21 +96,81 @@ func (h *CommandHandler) HandleCommand(ctx context.Context, cmd *pb.Command) *pb
 func (h *CommandHandler) handleDeleteFile(params map[string]string) (string, error) {
 	path, ok := params["path"]
 	if !ok {
+		log.Printf("ERROR: Missing required parameter 'path' in DELETE_FILE command")
 		return "", fmt.Errorf("missing required parameter 'path'")
 	}
-
-	// Check if file exists
-	if _, err := os.Stat(path); os.IsNotExist(err) {
-		return "", fmt.Errorf("file not found: %s", path)
+	
+	log.Printf("Attempting to delete file at path: %s", path)
+	
+	// Print all parameters received for debugging
+	log.Printf("All parameters received: %+v", params)
+	
+	// Check if path is absolute
+	if !filepath.IsAbs(path) {
+		log.Printf("WARNING: Path is not absolute, current working directory is: %s", getCurrentDirectory())
+		absPath, err := filepath.Abs(path)
+		if err != nil {
+			log.Printf("ERROR: Failed to get absolute path: %v", err)
+		} else {
+			log.Printf("INFO: Converted relative path to absolute: %s", absPath)
+			path = absPath
+		}
 	}
-
+	
+	// Check if file exists
+	fileInfo, err := os.Stat(path)
+	if os.IsNotExist(err) {
+		log.Printf("ERROR: File not found at path: %s", path)
+		
+		// Try to list parent directory to see what's available
+		parentDir := filepath.Dir(path)
+		log.Printf("DEBUG: Checking contents of parent directory: %s", parentDir)
+		
+		files, err := os.ReadDir(parentDir)
+		if err != nil {
+			log.Printf("ERROR: Could not read parent directory: %v", err)
+		} else {
+			log.Printf("DEBUG: Parent directory contents (%d entries):", len(files))
+			for i, file := range files {
+				if i < 10 { // Limit to first 10 entries to avoid log flooding
+					log.Printf("  - %s (isDir: %v)", file.Name(), file.IsDir())
+				}
+			}
+			if len(files) > 10 {
+				log.Printf("  - ... and %d more entries", len(files)-10)
+			}
+		}
+		
+		return "", fmt.Errorf("file not found: %s", path)
+	} else if err != nil {
+		log.Printf("ERROR: Failed to check file status: %v", err)
+		return "", fmt.Errorf("failed to check file status: %v", err)
+	}
+	
+	log.Printf("File exists, size: %d bytes, isDir: %v", fileInfo.Size(), fileInfo.IsDir())
+	
+	// Check file permissions before attempting to delete
+	log.Printf("DEBUG: File mode: %s", fileInfo.Mode().String())
+	
 	// Delete the file
-	err := os.Remove(path)
+	err = os.Remove(path)
 	if err != nil {
+		log.Printf("ERROR: Failed to delete file: %v", err)
 		return "", fmt.Errorf("failed to delete file: %v", err)
 	}
-
+	
+	log.Printf("SUCCESS: File %s deleted successfully", path)
 	return fmt.Sprintf("File %s deleted successfully", path), nil
+}
+
+// Helper function to get current directory
+func getCurrentDirectory() string {
+	dir, err := os.Getwd()
+	if err != nil {
+		log.Printf("ERROR: Failed to get current directory: %v", err)
+		return "unknown"
+	}
+	return dir
 }
 
 // handleKillProcess kills a process by PID

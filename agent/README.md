@@ -41,7 +41,7 @@ agent/
 2. **Build the Agent**:
    ```bash
    go mod tidy
-   go build -o edr-agent
+   go build -o edr-agent.exe
    ```
 
 ## Usage

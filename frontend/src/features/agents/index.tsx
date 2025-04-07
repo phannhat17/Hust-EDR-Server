@@ -105,6 +105,7 @@ export default function Agents() {
                               variant="outline" 
                               size="sm"
                               onClick={() => setSelectedAgent(agent)}
+                              className="mr-2"
                             >
                               Details
                             </Button>
@@ -183,6 +184,15 @@ export default function Agents() {
                             )}
                           </DialogContent>
                         </Dialog>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          asChild
+                        >
+                          <Link to="/commands" search={{ agent_id: agent.id }}>
+                            Command
+                          </Link>
+                        </Button>
                       </TableCell>
                     </TableRow>
                   ))}

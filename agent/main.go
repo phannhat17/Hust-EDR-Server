@@ -147,8 +147,8 @@ func commandHandler(client *client.EDRClient, handler *client.CommandHandler, ag
 	var lastCommandTime int64 = 0
 	
 	// Backoff for reconnections
-	backoff := time.Second
-	maxBackoff := 1 * time.Minute
+	backoff := time.Millisecond * 100
+	maxBackoff := 30 * time.Second
 	
 	for {
 		select {
@@ -160,12 +160,13 @@ func commandHandler(client *client.EDRClient, handler *client.CommandHandler, ag
 			ctx, cancel := context.WithCancel(context.Background())
 			
 			// Set up a goroutine to cancel the context when done
+			streamDone := make(chan struct{})
 			go func() {
 				select {
 				case <-done:
 					cancel()
-				case <-ctx.Done():
-					// Context is already done
+				case <-streamDone:
+					// Stream is already done
 				}
 			}()
 			
@@ -174,6 +175,7 @@ func commandHandler(client *client.EDRClient, handler *client.CommandHandler, ag
 			if err != nil {
 				log.Printf("Failed to establish command stream: %v. Retrying in %v...", err, backoff)
 				cancel()
+				close(streamDone)
 				select {
 				case <-time.After(backoff):
 					// Exponential backoff with jitter
@@ -188,52 +190,85 @@ func commandHandler(client *client.EDRClient, handler *client.CommandHandler, ag
 			}
 			
 			// Reset backoff on successful connection
-			backoff = time.Second
+			backoff = time.Millisecond * 100
+			
+			log.Printf("Command stream established, listening for commands...")
 			
 			// Process command stream
-			for {
+			streamActive := true
+			for streamActive {
 				select {
 				case <-done:
 					cancel()
+					close(streamDone)
 					return
 				default:
-					// Receive next command
-					cmd, err := stream.Recv()
-					if err != nil {
-						log.Printf("Command stream error: %v. Reconnecting...", err)
-						cancel()
-						break
-					}
+					// Receive next command with a timeout
+					recvDone := make(chan struct{})
+					var cmd *pb.Command
+					var recvErr error
 					
-					// Process command if newer than last one
-					if cmd.Timestamp > lastCommandTime {
-						log.Printf("Received command: %s (Type: %s)", cmd.CommandId, cmd.Type.String())
+					go func() {
+						cmd, recvErr = stream.Recv()
+						close(recvDone)
+					}()
+					
+					select {
+					case <-recvDone:
+						if recvErr != nil {
+							log.Printf("Command stream error: %v. Reconnecting...", recvErr)
+							cancel()
+							close(streamDone)
+							streamActive = false
+							break
+						}
 						
-						// Update last command time
-						lastCommandTime = cmd.Timestamp
+						// Print detailed debug info about received command
+						log.Printf("DEBUG: Received command - ID: %s, Type: %s, Timestamp: %d", 
+							cmd.CommandId, cmd.Type.String(), cmd.Timestamp)
+						log.Printf("DEBUG: Command params: %+v", cmd.Params)
 						
-						// Handle command asynchronously
-						go func(command *pb.Command) {
-							// Create context with timeout for command execution
-							cmdCtx, cmdCancel := context.WithTimeout(context.Background(), 
-								time.Duration(command.Timeout)*time.Second)
-							defer cmdCancel()
+						// Process command if newer than last one
+						if cmd.Timestamp > lastCommandTime {
+							log.Printf("Received command: %s (Type: %s)", cmd.CommandId, cmd.Type.String())
 							
-							// Process command
-							result := handler.HandleCommand(cmdCtx, command)
+							// Update last command time
+							lastCommandTime = cmd.Timestamp
 							
-							// Report result back to server
-							reportCtx, reportCancel := context.WithTimeout(context.Background(), 5*time.Second)
-							_, err := client.ReportCommandResult(reportCtx, result)
-							reportCancel()
-							
-							if err != nil {
-								log.Printf("Failed to report command result: %v", err)
-							}
-						}(cmd)
-					} else {
-						log.Printf("Ignoring old command: %s (Timestamp: %d, Last: %d)",
-							cmd.CommandId, cmd.Timestamp, lastCommandTime)
+							// Handle command asynchronously
+							go func(command *pb.Command) {
+								// Create context with timeout for command execution
+								cmdCtx, cmdCancel := context.WithTimeout(context.Background(), 
+									time.Duration(command.Timeout)*time.Second)
+								defer cmdCancel()
+								
+								log.Printf("DEBUG: Executing command with timeout: %d seconds", command.Timeout)
+								
+								// Process command
+								result := handler.HandleCommand(cmdCtx, command)
+								
+								log.Printf("DEBUG: Command executed, success: %v, message: %s", 
+									result.Success, result.Message)
+								
+								// Report result back to server
+								reportCtx, reportCancel := context.WithTimeout(context.Background(), 5*time.Second)
+								_, err := client.ReportCommandResult(reportCtx, result)
+								reportCancel()
+								
+								if err != nil {
+									log.Printf("Failed to report command result: %v", err)
+								} else {
+									log.Printf("Command result for %s reported successfully", command.CommandId)
+								}
+							}(cmd)
+						} else {
+							log.Printf("Ignoring old command: %s (Timestamp: %d, Last: %d)",
+								cmd.CommandId, cmd.Timestamp, lastCommandTime)
+						}
+					case <-done:
+						cancel()
+						close(streamDone)
+						return
 					}
 				}
 			}

@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package edr;
 
-option go_package = "github.com/phannhat17/Hust-EDR-Server/agent/proto";
+option go_package = "agent/proto";
 
 // The EDR service definition
 service EDRService {
@@ -17,6 +17,12 @@ service EDRService {
   
   // Command result reporting from agent to server
   rpc ReportCommandResult(CommandResult) returns (CommandAck) {}
+  
+  // List registered agents
+  rpc ListAgents(ListAgentsRequest) returns (ListAgentsResponse) {}
+  
+  // Send a command to an agent
+  rpc SendCommand(SendCommandRequest) returns (SendCommandResponse) {}
 }
 
 // Information about the agent
@@ -105,4 +111,23 @@ enum CommandType {
   BLOCK_URL = 5;
   NETWORK_ISOLATE = 6;
   NETWORK_RESTORE = 7;
+}
+
+// Messages for ListAgents
+message ListAgentsRequest {
+  // Empty request
+}
+
+message ListAgentsResponse {
+  repeated AgentInfo agents = 1;
+}
+
+// Messages for SendCommand
+message SendCommandRequest {
+  Command command = 1;
+}
+
+message SendCommandResponse {
+  bool success = 1;
+  string message = 2;
 } 
