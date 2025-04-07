@@ -8,6 +8,7 @@ import threading
 import json
 import os
 import uuid
+import queue
 from concurrent import futures
 
 import grpc
@@ -17,6 +18,233 @@ from app.config.config import config
 
 # Set up logging
 logger = logging.getLogger(__name__)
+
+# Command storage
+class CommandStorage:
+    """Storage for agent commands and results."""
+    
+    def __init__(self, storage_dir='data'):
+        self.storage_dir = storage_dir
+        self.commands_file = os.path.join(storage_dir, 'commands.json')
+        self.results_file = os.path.join(storage_dir, 'command_results.json')
+        os.makedirs(storage_dir, exist_ok=True)
+        
+        # In-memory command queues for each agent
+        self.command_queues = {}
+        
+        # In-memory command results
+        self.command_results = {}
+        
+        # Lock for thread safety
+        self.lock = threading.Lock()
+        
+        # Load existing commands and results
+        self._load_commands()
+        self._load_results()
+    
+    def _load_commands(self):
+        """Load commands from file."""
+        if os.path.exists(self.commands_file):
+            with open(self.commands_file, 'r') as f:
+                commands = json.load(f)
+                
+                # Initialize command queues for each agent
+                for cmd in commands.values():
+                    agent_id = cmd.get('agent_id')
+                    if agent_id not in self.command_queues:
+                        self.command_queues[agent_id] = queue.Queue()
+                    
+                    # Add command to queue if not completed
+                    cmd_id = cmd.get('command_id')
+                    if cmd_id and not self._has_result(cmd_id):
+                        self.command_queues[agent_id].put(cmd)
+                
+                logger.info(f"Loaded {len(commands)} commands from storage")
+        else:
+            logger.info("No existing commands found")
+    
+    def _load_results(self):
+        """Load command results from file."""
+        if os.path.exists(self.results_file):
+            with open(self.results_file, 'r') as f:
+                self.command_results = json.load(f)
+                logger.info(f"Loaded {len(self.command_results)} command results from storage")
+        else:
+            logger.info("No existing command results found")
+    
+    def _save_commands(self):
+        """Save commands to file."""
+        # Collect all commands from all queues
+        commands = {}
+        
+        for agent_id, agent_queue in self.command_queues.items():
+            # Get commands without removing them
+            queue_size = agent_queue.qsize()
+            temp_commands = []
+            
+            # Get commands temporarily
+            for _ in range(queue_size):
+                try:
+                    cmd = agent_queue.get_nowait()
+                    temp_commands.append(cmd)
+                except queue.Empty:
+                    break
+            
+            # Put commands back
+            for cmd in temp_commands:
+                commands[cmd['command_id']] = cmd
+                agent_queue.put(cmd)
+        
+        # Save to file
+        with open(self.commands_file, 'w') as f:
+            json.dump(commands, f, indent=2)
+            
+        logger.info(f"Saved {len(commands)} commands to storage")
+    
+    def _save_results(self):
+        """Save command results to file."""
+        with open(self.results_file, 'w') as f:
+            json.dump(self.command_results, f, indent=2)
+            
+        logger.info(f"Saved {len(self.command_results)} command results to storage")
+    
+    def _has_result(self, command_id):
+        """Check if a command has a result."""
+        return command_id in self.command_results
+    
+    def add_command(self, command):
+        """Add a command to an agent's queue."""
+        with self.lock:
+            # Convert Command protobuf to dict for storage
+            cmd_dict = self._command_to_dict(command)
+            
+            # Get or create agent queue
+            agent_id = command.agent_id
+            if agent_id not in self.command_queues:
+                self.command_queues[agent_id] = queue.Queue()
+            
+            # Add command to queue
+            self.command_queues[agent_id].put(cmd_dict)
+            
+            # Save commands
+            self._save_commands()
+            
+            logger.info(f"Added command {command.command_id} for agent {agent_id}")
+    
+    def get_commands(self, agent_id, last_command_time=0):
+        """Get all pending commands for an agent."""
+        with self.lock:
+            # Get or create agent queue
+            if agent_id not in self.command_queues:
+                self.command_queues[agent_id] = queue.Queue()
+                return []
+            
+            # Get all commands from queue
+            commands = []
+            queue_size = self.command_queues[agent_id].qsize()
+            
+            # Get commands temporarily
+            for _ in range(queue_size):
+                try:
+                    cmd = self.command_queues[agent_id].get_nowait()
+                    
+                    # Only return commands newer than last_command_time
+                    if cmd.get('timestamp', 0) > last_command_time:
+                        commands.append(cmd)
+                    
+                    # Put command back in queue (we'll remove it when result received)
+                    self.command_queues[agent_id].put(cmd)
+                except queue.Empty:
+                    break
+            
+            return commands
+    
+    def add_result(self, result):
+        """Add a command result."""
+        with self.lock:
+            command_id = result.command_id
+            
+            # Convert CommandResult protobuf to dict for storage
+            result_dict = self._result_to_dict(result)
+            
+            # Store result
+            self.command_results[command_id] = result_dict
+            
+            # Save results
+            self._save_results()
+            
+            # Remove command from queue if it exists
+            self._remove_command(result.agent_id, command_id)
+            
+            logger.info(f"Added result for command {command_id}")
+            return True
+    
+    def _remove_command(self, agent_id, command_id):
+        """Remove a command from an agent's queue."""
+        if agent_id not in self.command_queues:
+            return
+        
+        # Get all commands from queue
+        commands = []
+        queue_size = self.command_queues[agent_id].qsize()
+        
+        # Get commands temporarily
+        for _ in range(queue_size):
+            try:
+                cmd = self.command_queues[agent_id].get_nowait()
+                
+                # Keep command if it's not the one we're removing
+                if cmd.get('command_id') != command_id:
+                    commands.append(cmd)
+            except queue.Empty:
+                break
+        
+        # Put commands back
+        for cmd in commands:
+            self.command_queues[agent_id].put(cmd)
+        
+        # Save commands
+        self._save_commands()
+    
+    def get_result(self, command_id):
+        """Get a command result."""
+        with self.lock:
+            return self.command_results.get(command_id)
+    
+    def _command_to_dict(self, command):
+        """Convert Command protobuf to dict."""
+        return {
+            'command_id': command.command_id,
+            'agent_id': command.agent_id,
+            'timestamp': command.timestamp,
+            'type': command.type,
+            'params': dict(command.params),
+            'priority': command.priority,
+            'timeout': command.timeout
+        }
+    
+    def _result_to_dict(self, result):
+        """Convert CommandResult protobuf to dict."""
+        return {
+            'command_id': result.command_id,
+            'agent_id': result.agent_id,
+            'success': result.success,
+            'message': result.message,
+            'execution_time': result.execution_time,
+            'duration_ms': result.duration_ms
+        }
+    
+    def _dict_to_command(self, cmd_dict):
+        """Convert dict to Command protobuf."""
+        return agent_pb2.Command(
+            command_id=cmd_dict['command_id'],
+            agent_id=cmd_dict['agent_id'],
+            timestamp=cmd_dict['timestamp'],
+            type=cmd_dict['type'],
+            params=cmd_dict['params'],
+            priority=cmd_dict['priority'],
+            timeout=cmd_dict['timeout']
+        )
 
 class FileStorage:
     """Simple file-based storage for agent data."""
@@ -108,6 +336,11 @@ class EDRServicer(agent_pb2_grpc.EDRServiceServicer):
     
     def __init__(self):
         self.storage = FileStorage()
+        self.command_storage = CommandStorage()
+        
+        # Active command streams by agent ID
+        self.active_streams = {}
+        self.stream_lock = threading.Lock()
     
     def RegisterAgent(self, request, context):
         """Handle agent registration."""
@@ -216,6 +449,135 @@ class EDRServicer(agent_pb2_grpc.EDRServiceServicer):
             acknowledged=True,
             server_time=int(time.time())
         )
+    
+    def ReceiveCommands(self, request, context):
+        """Stream commands to agent."""
+        agent_id = request.agent_id
+        last_command_time = request.last_command_time
+        
+        logger.info(f"Agent {agent_id} established command stream (last command time: {last_command_time})")
+        
+        # Check if agent exists
+        agent = self.storage.get_agent(agent_id)
+        if not agent:
+            logger.warning(f"Command stream request from unknown agent: {agent_id}")
+            context.abort(grpc.StatusCode.NOT_FOUND, "Unknown agent")
+            return
+        
+        # Update agent status
+        agent['last_seen'] = int(time.time())
+        agent['status'] = 'ONLINE'
+        self.storage.save_agent(agent_id, agent)
+        
+        # Register this stream
+        with self.stream_lock:
+            self.active_streams[agent_id] = context
+        
+        # Send any pending commands immediately
+        pending_commands = self.command_storage.get_commands(agent_id, last_command_time)
+        for cmd_dict in pending_commands:
+            # Convert dict to Command protobuf
+            command = self._dict_to_command(cmd_dict)
+            logger.info(f"Sending pending command {command.command_id} to agent {agent_id}")
+            yield command
+        
+        # Keep the stream open for new commands
+        try:
+            while context.is_active():
+                time.sleep(1)  # Avoid tight loop
+        except Exception as e:
+            logger.warning(f"Command stream for agent {agent_id} ended: {e}")
+        finally:
+            # Unregister stream
+            with self.stream_lock:
+                if agent_id in self.active_streams and self.active_streams[agent_id] == context:
+                    del self.active_streams[agent_id]
+            
+            logger.info(f"Command stream for agent {agent_id} closed")
+    
+    def ReportCommandResult(self, request, context):
+        """Handle command result from agent."""
+        command_id = request.command_id
+        agent_id = request.agent_id
+        
+        logger.info(f"Received command result for {command_id} from agent {agent_id}")
+        logger.info(f"Success: {request.success}")
+        logger.info(f"Message: {request.message}")
+        logger.info(f"Execution time: {request.execution_time}")
+        logger.info(f"Duration: {request.duration_ms}ms")
+        
+        # Store result
+        self.command_storage.add_result(request)
+        
+        # Return acknowledgment
+        return agent_pb2.CommandAck(
+            command_id=command_id,
+            received=True,
+            message="Result received"
+        )
+    
+    def _dict_to_command(self, cmd_dict):
+        """Convert dict to Command protobuf."""
+        return agent_pb2.Command(
+            command_id=cmd_dict['command_id'],
+            agent_id=cmd_dict['agent_id'],
+            timestamp=cmd_dict['timestamp'],
+            type=cmd_dict['type'],
+            params=cmd_dict['params'],
+            priority=cmd_dict['priority'],
+            timeout=cmd_dict['timeout']
+        )
+    
+    def add_command(self, command):
+        """Add a command to be sent to an agent."""
+        agent_id = command.agent_id
+        
+        # Store command
+        self.command_storage.add_command(command)
+        
+        # If agent has an active stream, send command immediately
+        with self.stream_lock:
+            if agent_id in self.active_streams:
+                try:
+                    context = self.active_streams[agent_id]
+                    if context.is_active():
+                        logger.info(f"Sending command {command.command_id} to agent {agent_id} immediately")
+                        context.send(command)
+                except Exception as e:
+                    logger.error(f"Error sending command to agent {agent_id}: {e}")
+    
+    def ListAgents(self, request, context):
+        """List all registered agents."""
+        try:
+            agents = []
+            for agent_id, agent_data in self.storage.agents.items():
+                agent = agent_pb2.AgentInfo(
+                    agent_id=agent_id,
+                    hostname=agent_data.get('hostname', ''),
+                    ip_address=agent_data.get('ip_address', ''),
+                    status=agent_data.get('status', ''),
+                    last_seen=agent_data.get('last_seen', 0)
+                )
+                agents.append(agent)
+            
+            return agent_pb2.ListAgentsResponse(agents=agents)
+        except Exception as e:
+            logger.error(f"Error listing agents: {e}")
+            context.set_code(grpc.StatusCode.INTERNAL)
+            context.set_details(str(e))
+            return agent_pb2.ListAgentsResponse()
+    
+    def SendCommand(self, request, context):
+        """Send a command to an agent."""
+        try:
+            command = request.command
+            self.command_storage.add_command(command)
+            return agent_pb2.SendCommandResponse(success=True, message="Command sent successfully")
+        except Exception as e:
+            logger.error(f"Error sending command: {e}")
+            context.set_code(grpc.StatusCode.INTERNAL)
+            context.set_details(str(e))
+            return agent_pb2.SendCommandResponse(success=False, message=str(e))
 
 def start_grpc_server(port=None):
     """Start the gRPC server in a background thread.

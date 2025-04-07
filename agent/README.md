@@ -1,66 +1,104 @@
-# Hust-EDR Windows Agent
+# HUST EDR Agent
 
-This is a Windows agent for the Hust-EDR system, written in Go. The agent collects system information and sends it to the EDR management server via gRPC.
+The agent component of the HUST EDR system, providing system monitoring, command execution, and network control capabilities.
 
 ## Features
 
-- Collects system information (hostname, IP address, MAC address, username, Windows version)
-- Secure communication with the server using gRPC
-- Periodic status updates
-- Low overhead operation
+- System information collection
+- Real-time status reporting
+- Command execution
+- File operations
+- Process management
+- Network control
+- Secure gRPC communication
+
+## Directory Structure
+
+```
+agent/
+├── client/           # gRPC client implementation
+├── proto/           # Protocol definitions
+├── syscollector/    # System information collection
+├── config/          # Configuration
+└── main.go          # Agent entry point
+```
 
 ## Requirements
 
-- Go 1.20 or later
-- Windows operating system
-- Network connectivity to the EDR management server
+- Go 1.20+
+- Windows or Linux operating system
+- Administrative privileges for certain operations
 
-## Building the Agent
+## Building
 
-### Generate gRPC code
+1. **Generate gRPC Code**:
+   ```bash
+   protoc --go_out=. --go_opt=paths=source_relative \
+       --go-grpc_out=. --go-grpc_opt=paths=source_relative \
+       proto/agent.proto
+   ```
 
-Before building the agent, you need to generate the gRPC code from the Protocol Buffers definition:
+2. **Build the Agent**:
+   ```bash
+   go mod tidy
+   go build -o edr-agent
+   ```
+
+## Usage
+
+Run the agent with the following options:
 
 ```bash
-cd proto
-protoc --go_out=. --go_opt=paths=source_relative --go-grpc_out=. --go-grpc_opt=paths=source_relative agent.proto
-cd ..
+./edr-agent.exe [options]
 ```
 
-### Build the Agent
-
-```bash
-go build -o edr-agent.exe
-```
-
-## Running the Agent
-
-```bash
-# Basic usage
-./edr-agent.exe
-
-# Custom server address
-./edr-agent.exe -server=edr-server.example.com:50051
-
-# Custom update interval (in seconds)
-./edr-agent.exe -interval=30
-```
-
-## Command-line Options
-
-- `-server`: Server address in the format of host:port (default: localhost:50051)
+Options:
+- `-server`: Server address (default: localhost:50051)
 - `-interval`: Status update interval in seconds (default: 60)
+- `-tls`: Enable TLS (default: false)
+- `-insecure`: Skip TLS verification (default: false)
 
-## Integration with EDR Server
+Example:
+```bash
+./edr-agent.exe -server=localhost:50051 -interval=30
+```
 
-The agent communicates with the EDR management server via gRPC. It registers with the server upon startup and sends periodic status updates.
+## Supported Commands
 
-To integrate the agent with the server:
+The agent can execute the following commands:
 
-1. Configure the server to accept gRPC connections on the specified port
-2. Implement the EDRService interface on the server side
+1. **File Operations**:
+   - Delete file
+
+2. **Process Management**:
+   - Kill process
+   - Kill process tree
+
+3. **Network Control**:
+   - Block IP address
+   - Block URL
+   - Network isolation
+   - Network restoration
+
+## System Information Collection
+
+The agent collects:
+- CPU usage
+- Memory usage
+- Disk usage
+- Network traffic
+- System information (hostname, OS, etc.)
 
 ## Security
 
-- The agent uses a machine-specific ID for authentication
-- For production use, consider implementing additional authentication mechanisms 
+- All communication with the server is done via gRPC
+- TLS support for secure communication
+- Administrative privileges required for certain operations
+
+## Protocol
+
+The agent uses gRPC for communication with the server. See `proto/agent.proto` for the protocol definition.
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](../LICENSE) file for details. 

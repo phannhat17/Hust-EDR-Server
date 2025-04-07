@@ -1,85 +1,99 @@
-# EDR Backend
+# HUST EDR Server Backend
 
-This is the backend server for the Endpoint Detection and Response (EDR) system.
+The server component of the HUST EDR system, providing agent management, command execution, and status monitoring capabilities.
 
 ## Features
 
-- RESTful API for managing alerts and rules
-- gRPC server for agent communication
-- Elasticsearch integration for alert storage
-- Agent metrics collection and monitoring
-
-## Getting Started
-
-### Prerequisites
-
-- Python 3.8+
-- Elasticsearch (optional)
-- Docker (optional, for ElastAlert)
-
-### Installation
-
-1. Clone the repository
-2. Install dependencies:
-
-```bash
-pip install -r requirements.txt
-```
-
-3. Configure environment variables in `.env` file (see `.env.example`)
-
-### Running the Application
-
-Use the single entry point to run the application:
-
-```bash
-python server.py
-```
-
-The server will start:
-- Flask API server on port 5000 (default)
-- gRPC server on port 50051 (default)
-
-## Configuration
-
-All configuration is now in a single place: `app/config/config.py`
-
-Important configuration options:
-- `PORT`: Flask server port (default: 5000)
-- `GRPC_PORT`: gRPC server port (default: 50051)
-- `API_KEY`: API key for securing API endpoints
-
-## API Endpoints
-
-- `/health`: Health check endpoint
-- `/api/alerts`: Manage alerts
-- `/api/rules`: Manage ElastAlert rules
-- `/api/dashboard`: Dashboard data
-
-## gRPC Services
-
-The gRPC server provides:
-- Agent registration
-- Status updates
+- Agent registration and management
+- Real-time status monitoring
+- Command execution and result reporting
 - System metrics collection
+- Secure gRPC communication
 
-## Development
-
-The application structure:
+## Directory Structure
 
 ```
 backend/
-├── app/
-│   ├── api/
-│   │   ├── routes/        # API route handlers
-│   │   └── models/        # Data models
-│   ├── config/            # Configuration
-│   ├── core/              # Core utilities
-│   ├── grpc/              # gRPC server implementation
-│   ├── __init__.py        # Flask application factory
-│   └── elastalert.py      # ElastAlert client
-├── data/                  # Agent data storage
-├── rules/                 # ElastAlert rules
-├── server.py              # Main entry point
-└── requirements.txt       # Python dependencies
+├── app/                # Application code
+│   ├── grpc/          # gRPC server implementation
+│   └── config/        # Configuration files
+├── data/              # Data storage
+│   ├── agents.json    # Registered agents
+│   ├── commands.json  # Pending commands
+│   └── command_results.json  # Command execution results
+├── agent_commands.proto  # Protocol definitions
+├── send_command.py    # Command-line tool
+└── server.py          # Server entry point
 ```
+
+## Setup
+
+1. **Install Dependencies**:
+   ```bash
+   python -m venv .venv
+   source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+   pip install -r requirements.txt
+   ```
+
+2. **Generate gRPC Code**:
+   ```bash
+   chmod +x regenerate_proto.sh
+   ./regenerate_proto.sh
+   ```
+
+3. **Configure Environment**:
+   ```bash
+   cp .env.example .env
+   # Edit .env with your configuration
+   ```
+
+## Usage
+
+1. **Start the Server**:
+   ```bash
+   python server.py
+   ```
+
+2. **Send Commands**:
+   ```bash
+   # List connected agents
+   python send_command.py list
+
+   # Delete a file
+   python send_command.py delete --agent <agent_id> --path /path/to/file
+
+   # Kill a process
+   python send_command.py kill --agent <agent_id> --pid <process_id>
+
+   # Block an IP
+   python send_command.py block-ip --agent <agent_id> --ip <ip_address>
+
+   # Isolate network
+   python send_command.py isolate --agent <agent_id>
+   ```
+
+## Available Commands
+
+- `list`: List all connected agents
+- `delete`: Delete a file
+- `kill`: Kill a process
+- `kill-tree`: Kill a process and its children
+- `block-ip`: Block an IP address
+- `block-url`: Block a URL
+- `isolate`: Isolate machine from network
+- `restore`: Restore network connectivity
+
+## Data Storage
+
+The server stores data in JSON files:
+- `data/agents.json`: Registered agent information
+- `data/commands.json`: Pending commands
+- `data/command_results.json`: Command execution results
+
+## Protocol
+
+The server uses gRPC for communication with agents. See `agent_commands.proto` for the protocol definition.
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](../LICENSE) file for details.

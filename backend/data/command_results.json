@@ -1,0 +1,18 @@
+{
+  "0768652e-5ae0-4da3-a276-1a606d3401b1": {
+    "command_id": "0768652e-5ae0-4da3-a276-1a606d3401b1",
+    "agent_id": "939c9832-3df1-4c25-8da0-01bb66b0be5e",
+    "success": true,
+    "message": "File C:\\Users\\f1rst\\Downloads\\TwingateWindowsInstaller.msi deleted successfully",
+    "execution_time": 1744014451,
+    "duration_ms": 1
+  },
+  "4864ae6a-c68c-45ea-a8cf-1042b491d22a": {
+    "command_id": "4864ae6a-c68c-45ea-a8cf-1042b491d22a",
+    "agent_id": "939c9832-3df1-4c25-8da0-01bb66b0be5e",
+    "success": true,
+    "message": "File C:\\Users\\f1rst\\Downloads\\final.drawio deleted successfully",
+    "execution_time": 1744014562,
+    "duration_ms": 0
+  }
+}
