@@ -26,6 +26,13 @@ import { Search } from '@/components/search'
 import { ThemeSwitch } from '@/components/theme-switch'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 import { useState } from 'react'
+import { DotsHorizontalIcon } from '@radix-ui/react-icons'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 
 export default function Agents() {
   const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null)
@@ -99,13 +106,46 @@ export default function Agents() {
                       </TableCell>
                       <TableCell>{new Date(agent.last_seen).toLocaleString()}</TableCell>
                       <TableCell>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              className="h-8 w-8 p-0"
+                            >
+                              <DotsHorizontalIcon className="h-4 w-4" />
+                              <span className="sr-only">Show options</span>
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem
+                              onClick={() => {
+                                setSelectedAgent(agent);
+                                // Open the dialog programmatically by finding and clicking the button
+                                const detailsButton = document.querySelector(`#details-dialog-${agent.id}`);
+                                if (detailsButton instanceof HTMLButtonElement) {
+                                  detailsButton.click();
+                                }
+                              }}
+                            >
+                              Details
+                            </DropdownMenuItem>
+                            <DropdownMenuItem asChild>
+                              <Link to="/commands" search={{ agent_id: agent.id }}>
+                                Command
+                              </Link>
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                        
+                        {/* Hidden dialog trigger that the dropdown can activate */}
                         <Dialog>
                           <DialogTrigger asChild>
                             <Button 
+                              id={`details-dialog-${agent.id}`}
                               variant="outline" 
                               size="sm"
                               onClick={() => setSelectedAgent(agent)}
-                              className="mr-2"
+                              className="hidden"
                             >
                               Details
                             </Button>
@@ -184,15 +224,6 @@ export default function Agents() {
                             )}
                           </DialogContent>
                         </Dialog>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          asChild
-                        >
-                          <Link to="/commands" search={{ agent_id: agent.id }}>
-                            Command
-                          </Link>
-                        </Button>
                       </TableCell>
                     </TableRow>
                   ))}

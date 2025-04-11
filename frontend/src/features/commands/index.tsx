@@ -10,10 +10,12 @@ import { AgentSelector } from '@/components/agent-selector';
 import { CommandForm } from './command-form';
 import { formatDistanceToNow } from 'date-fns';
 import { useRouter, useSearch } from '@tanstack/react-router';
+import { apiClient } from '@/lib/api/client';
 
 export default function Commands() {
   const [selectedTab, setSelectedTab] = useState('send');
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
+  const [agentHostname, setAgentHostname] = useState<string | null>(null);
   const { agent_id } = useSearch({ from: '/_authenticated/commands/' });
   const router = useRouter();
 
@@ -22,6 +24,24 @@ export default function Commands() {
     queryKey: ['commands'],
     queryFn: () => commandsApi.getCommands(),
   });
+
+  // Fetch agent details when agent_id is available
+  const { data: agentDetails } = useQuery({
+    queryKey: ['agent', selectedAgentId],
+    queryFn: async () => {
+      if (!selectedAgentId) return null;
+      const response = await apiClient.get(`/api/agents/${selectedAgentId}`);
+      return response.data;
+    },
+    enabled: !!selectedAgentId,
+  });
+
+  // Update agent hostname when agent details change
+  useEffect(() => {
+    if (agentDetails) {
+      setAgentHostname(agentDetails.hostname);
+    }
+  }, [agentDetails]);
 
   // Execute command mutation
   const executeMutation = useMutation({
@@ -56,108 +76,129 @@ export default function Commands() {
     }
   };
 
-  return (
-    <div className="p-6 max-w-7xl mx-auto">
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-3xl font-bold">Commands</h1>
-          <p className="text-muted-foreground">Send commands to agents and view command history</p>
-        </div>
-      </div>
+  // Filter commands by agent_id if provided
+  const filteredCommands = agent_id 
+    ? commands?.filter(command => command.agent_id === agent_id)
+    : commands;
 
-      <Tabs value={selectedTab} onValueChange={setSelectedTab} className="w-full">
-        <TabsList className="grid w-full md:w-auto grid-cols-2">
-          <TabsTrigger value="send">Send Command</TabsTrigger>
-          <TabsTrigger value="history">Command History</TabsTrigger>
-        </TabsList>
-        
-        <TabsContent value="send" className="pt-4">
-          <Card>
-            <CardHeader>
-              <CardTitle>Send Command</CardTitle>
-              <CardDescription>Execute commands on remote agents</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="mb-6">
-                <label className="text-sm font-medium">Select Agent</label>
-                <AgentSelector onAgentChange={handleAgentChange} selectedAgentId={selectedAgentId || undefined} />
-              </div>
+  return (
+    <>
+      <div className="flex-1 space-y-4 p-8 pt-6">
+        <div className="flex items-center justify-between">
+          <h1 className="text-2xl font-bold tracking-tight">Commands</h1>
+        </div>
+
+        <Card className="col-span-3">
+          <CardHeader>
+            <CardTitle>Send Commands</CardTitle>
+            <CardDescription>Send commands to agents and view command history</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Tabs defaultValue={selectedTab} value={selectedTab} onValueChange={setSelectedTab} className="w-full">
+              <TabsList className="grid w-full grid-cols-2 mb-4">
+                <TabsTrigger value="send">Send Command</TabsTrigger>
+                <TabsTrigger value="history">Command History</TabsTrigger>
+              </TabsList>
               
-              {selectedAgentId ? (
-                <CommandForm 
-                  agentId={selectedAgentId} 
-                  onSubmit={(data) => {
-                    executeMutation.mutate(data);
-                  }} 
-                  isSubmitting={executeMutation.isPending}
-                  error={executeMutation.error ? String(executeMutation.error) : undefined}
-                  success={executeMutation.isSuccess}
-                />
-              ) : (
-                <div className="py-8 text-center text-muted-foreground">
-                  Please select an agent to send commands
+              <TabsContent value="send" className="space-y-4">
+                <div className="space-y-4">
+                  {!agent_id && (
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium">Select Agent</label>
+                      <AgentSelector onAgentChange={handleAgentChange} selectedAgentId={selectedAgentId || undefined} />
+                    </div>
+                  )}
+                  
+                  {agentHostname && agent_id && (
+                    <div className="rounded-md bg-muted p-4">
+                      <p className="text-sm">
+                        Current agent: <span className="font-medium">{agentHostname}</span>
+                      </p>
+                    </div>
+                  )}
+                  
+                  {selectedAgentId ? (
+                    <CommandForm 
+                      agentId={selectedAgentId} 
+                      onSubmit={(data) => {
+                        executeMutation.mutate(data);
+                      }} 
+                      isSubmitting={executeMutation.isPending}
+                      error={executeMutation.error ? String(executeMutation.error) : undefined}
+                      success={executeMutation.isSuccess}
+                    />
+                  ) : (
+                    <div className="rounded-md bg-muted p-8 text-center">
+                      <p className="text-sm text-muted-foreground">
+                        Please select an agent to send commands
+                      </p>
+                    </div>
+                  )}
                 </div>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
-        
-        <TabsContent value="history" className="pt-4">
-          <Card>
-            <CardHeader>
-              <CardTitle>Command History</CardTitle>
-              <CardDescription>View the results of previously executed commands</CardDescription>
-            </CardHeader>
-            <CardContent>
-              {isLoading ? (
-                <div className="py-8 text-center">Loading commands...</div>
-              ) : error ? (
-                <div className="py-8 text-center text-destructive">
-                  Error loading commands: {String(error)}
+              </TabsContent>
+              
+              <TabsContent value="history" className="space-y-4">
+                <div className="space-y-4">
+                  {agentHostname && agent_id && (
+                    <div className="rounded-md bg-muted p-4">
+                      <p className="text-sm">
+                        Showing commands for agent: <span className="font-medium">{agentHostname}</span>
+                      </p>
+                    </div>
+                  )}
+
+                  {isLoading ? (
+                    <div className="rounded-md bg-muted p-8 text-center">
+                      <p className="text-sm text-muted-foreground">Loading commands...</p>
+                    </div>
+                  ) : error ? (
+                    <div className="rounded-md bg-destructive/10 p-8 text-center text-destructive">
+                      <p className="text-sm">Error loading commands: {String(error)}</p>
+                    </div>
+                  ) : filteredCommands?.length === 0 ? (
+                    <div className="rounded-md bg-muted p-8 text-center">
+                      <p className="text-sm text-muted-foreground">
+                        No commands have been executed yet {agent_id && "for this agent"}
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="rounded-md border">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            {!agent_id && <TableHead>Agent ID</TableHead>}
+                            <TableHead>Status</TableHead>
+                            <TableHead>Execution Time</TableHead>
+                            <TableHead>Duration</TableHead>
+                            <TableHead className="w-[50%]">Message</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {filteredCommands?.map((command: Command) => (
+                            <TableRow key={command.id}>
+                              {!agent_id && <TableCell className="font-mono text-xs">{command.agent_id}</TableCell>}
+                              <TableCell>
+                                <Badge variant={command.success ? "green" : "destructive"}>
+                                  {command.success ? "Success" : "Failed"}
+                                </Badge>
+                              </TableCell>
+                              <TableCell>
+                                {command.execution_time ? formatDistanceToNow(command.execution_time, { addSuffix: true }) : 'Unknown'}
+                              </TableCell>
+                              <TableCell>{command.duration_ms}ms</TableCell>
+                              <TableCell className="break-all">{command.message}</TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  )}
                 </div>
-              ) : commands?.length === 0 ? (
-                <div className="py-8 text-center text-muted-foreground">
-                  No commands have been executed yet
-                </div>
-              ) : (
-                <Table>
-                  <TableCaption>A list of all executed commands</TableCaption>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Command Type</TableHead>
-                      <TableHead>Agent ID</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead>Execution Time</TableHead>
-                      <TableHead>Duration</TableHead>
-                      <TableHead>Message</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {commands?.map((command: Command) => (
-                      <TableRow key={command.id}>
-                        <TableCell>
-                          <Badge variant="outline">{command.type}</Badge>
-                        </TableCell>
-                        <TableCell className="font-mono text-xs">{command.agent_id}</TableCell>
-                        <TableCell>
-                          <Badge variant={command.success ? "green" : "destructive"}>
-                            {command.success ? "Success" : "Failed"}
-                          </Badge>
-                        </TableCell>
-                        <TableCell>
-                          {command.execution_time ? formatDistanceToNow(command.execution_time, { addSuffix: true }) : 'Unknown'}
-                        </TableCell>
-                        <TableCell>{command.duration_ms}ms</TableCell>
-                        <TableCell className="max-w-xs truncate">{command.message}</TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
-    </div>
+              </TabsContent>
+            </Tabs>
+          </CardContent>
+        </Card>
+      </div>
+    </>
   );
 } 

@@ -19,9 +19,9 @@ export function AgentSelector({ onAgentChange, selectedAgentId }: AgentSelectorP
     },
   });
 
-  // Set the first agent as selected by default if none is specified
+  // Set the first agent as selected by default ONLY if none is specified and no agent is currently selected
   useEffect(() => {
-    if (!selectedAgentId && agents && agents.length > 0) {
+    if (!selectedAgentId && agents && agents.length > 0 && !document.location.search.includes('agent_id')) {
       onAgentChange(agents[0].id);
     }
   }, [agents, selectedAgentId, onAgentChange]);
