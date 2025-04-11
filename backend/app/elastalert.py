@@ -11,12 +11,17 @@ from datetime import datetime
 from pathlib import Path
 from elasticsearch import Elasticsearch
 from app.config.config import config
+from app.elastalert_auto_response import AutoResponseHandler
 
 logger = logging.getLogger(__name__)
 
 class ElastAlertClient:
-    def __init__(self):
-        """Initialize the ElastAlert client using the application config."""
+    def __init__(self, grpc_server=None):
+        """Initialize the ElastAlert client using the application config.
+        
+        Args:
+            grpc_server: Optional gRPC server instance for sending commands
+        """
         # Setup Elasticsearch client
         try:
             self.es_client = Elasticsearch(**config.get_elasticsearch_config())
@@ -28,6 +33,9 @@ class ElastAlertClient:
         # ElastAlert settings
         self.alerts_index = config.ELASTALERT_INDEX
         self.rules_dir = config.ELASTALERT_RULES_DIR
+        
+        # Auto-response handler
+        self.auto_response_handler = AutoResponseHandler(grpc_server)
         
         # Ensure rules directory exists
         Path(self.rules_dir).mkdir(parents=True, exist_ok=True)
@@ -332,6 +340,126 @@ class ElastAlertClient:
         except Exception as e:
             logger.error(f"Error restarting ElastAlert container: {e}")
             return False
-
-# Create a singleton instance
-elastalert_client = ElastAlertClient() 
+    
+    def process_alert_auto_response(self, alert):
+        """Process an alert with auto-response actions if applicable.
+        
+        Args:
+            alert (dict): The alert data
+            
+        Returns:
+            dict: Information about actions taken
+        """
+        # Get the rule that triggered this alert
+        rule_name = alert.get('rule_name', '')
+        if not rule_name:
+            logger.warning("Alert has no rule_name, can't process auto-response")
+            return {"success": False, "message": "No rule name in alert"}
+            
+        # Try to find the rule file
+        rule = None
+        for r in self.get_rules():
+            if r.get('name') == rule_name:
+                rule = r
+                break
+                
+        if not rule:
+            logger.warning(f"Rule not found for alert: {rule_name}")
+            return {"success": False, "message": f"Rule not found: {rule_name}"}
+            
+        # Process auto-response
+        try:
+            result = self.auto_response_handler.process_alert(alert, rule)
+            
+            # Update alert with auto-response result if successful
+            if result.get("success", False) and 'response_info' in result:
+                self.update_alert_status(
+                    alert['id'],
+                    "in_progress",
+                    notes=f"Auto-response actions executed: {json.dumps(result['response_info'])}",
+                    assigned_to="Auto-response System"
+                )
+                
+            return result
+        except Exception as e:
+            logger.error(f"Error processing auto-response for alert: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return {"success": False, "message": f"Error: {str(e)}"}
+    
+    def process_pending_alerts(self, limit=20):
+        """Process pending alerts with auto-response.
+        
+        Args:
+            limit (int): Maximum number of alerts to process
+            
+        Returns:
+            dict: Summary of processing results
+        """
+        # Get new alerts
+        query = {
+            "query": {
+                "bool": {
+                    "must": [
+                        {"match": {"edr_status": "new"}}
+                    ]
+                }
+            },
+            "sort": [
+                {"@timestamp": {"order": "desc"}}
+            ],
+            "size": limit
+        }
+        
+        try:
+            # Check if index exists
+            if not self.es_client or not self.es_client.indices.exists(index=self.alerts_index):
+                return {"processed": 0, "success": 0, "error": "Index does not exist or not connected"}
+                
+            # Search for new alerts
+            response = self.es_client.search(
+                index=self.alerts_index,
+                body=query
+            )
+            
+            hits = response['hits']['hits']
+            logger.info(f"Found {len(hits)} new alerts to process for auto-response")
+            
+            results = {
+                "processed": len(hits),
+                "success": 0,
+                "failed": 0,
+                "details": []
+            }
+            
+            # Process each alert
+            for hit in hits:
+                alert = {
+                    'id': hit['_id'],
+                    'timestamp': hit['_source'].get('@timestamp', ''),
+                    'rule_name': hit['_source'].get('rule_name', 'Unknown Rule'),
+                    'raw_data': hit['_source']
+                }
+                
+                result = self.process_alert_auto_response(alert)
+                
+                if result.get("success", False):
+                    results["success"] += 1
+                else:
+                    results["failed"] += 1
+                    
+                results["details"].append({
+                    "alert_id": alert['id'],
+                    "rule_name": alert['rule_name'],
+                    "success": result.get("success", False),
+                    "message": result.get("message", ""),
+                    "response_info": result.get("response_info", {})
+                })
+                
+            return results
+                
+        except Exception as e:
+            logger.error(f"Error processing pending alerts: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return {"processed": 0, "success": 0, "error": str(e)} 

@@ -7,7 +7,7 @@ import logging
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 from app.config.config import config
-from app.elastalert import elastalert_client
+from app.elastalert import ElastAlertClient
 
 # Set up logging
 logging.basicConfig(
@@ -23,7 +23,13 @@ def create_app():
     # Enable CORS
     CORS(app, resources={r"/*": {"origins": "*"}})
     
-    # Add elastalert client to app config
+    # Start gRPC server
+    from app.grpc.server import start_grpc_server
+    grpc_server = start_grpc_server(port=config.GRPC_PORT)
+    app.grpc_server = grpc_server
+    
+    # Create elastalert client with gRPC server and add to app config
+    elastalert_client = ElastAlertClient(grpc_server.servicer)
     app.config['elastalert_client'] = elastalert_client
     
     # Import blueprints
@@ -62,11 +68,6 @@ def create_app():
             if api_key != config.API_KEY:
                 logger.warning(f"Invalid API key in before_request handler: {api_key}")
                 return jsonify({"error": "Invalid API key"}), 401
-    
-    # Start gRPC server
-    from app.grpc.server import start_grpc_server
-    grpc_server = start_grpc_server(port=config.GRPC_PORT)
-    app.grpc_server = grpc_server
     
     logger.info("Flask application initialized with gRPC server and API routes")
     
