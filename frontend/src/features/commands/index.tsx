@@ -11,6 +11,7 @@ import { CommandForm } from './command-form';
 import { formatDistanceToNow } from 'date-fns';
 import { useRouter, useSearch } from '@tanstack/react-router';
 import { apiClient } from '@/lib/api/client';
+import { isAgentOnline } from '@/types/agent';
 
 export default function Commands() {
   const [selectedTab, setSelectedTab] = useState('send');
@@ -114,14 +115,47 @@ export default function Commands() {
                       <label className="text-sm font-medium">Select Agent</label>
                       <AgentSelector onAgentChange={handleAgentChange} selectedAgentId={selectedAgentId || undefined} />
                     </div>
+                  ) : agentDetails ? (
+                    <div className="rounded-md bg-muted p-4 space-y-4">
+                      <div className="flex items-center justify-between">
+                        <div className="space-y-1">
+                          <div className="flex items-center space-x-2">
+                            <h3 className="text-sm font-medium">{agentDetails.hostname}</h3>
+                            <Badge variant={isAgentOnline(agentDetails.last_seen) ? "green" : "destructive"}>
+                              {isAgentOnline(agentDetails.last_seen) ? "Online" : "Offline"}
+                            </Badge>
+                          </div>
+                          <p className="text-xs text-muted-foreground">{agentDetails.os}</p>
+                        </div>
+                        <Button variant="ghost" size="sm" onClick={clearAgentSelection}>
+                          Change Agent
+                        </Button>
+                      </div>
+                      
+                      <div className="grid grid-cols-3 gap-4 pt-2">
+                        <div className="space-y-1">
+                          <p className="text-xs text-muted-foreground">System Stats</p>
+                          <div className="text-sm">
+                            CPU: {agentDetails.cpu_usage.toFixed(1)}% • Memory: {agentDetails.memory_usage.toFixed(1)}%
+                          </div>
+                        </div>
+                        <div className="space-y-1">
+                          <p className="text-xs text-muted-foreground">Network</p>
+                          <div className="text-sm">
+                            {agentDetails.ip_address} • {agentDetails.mac_address}
+                          </div>
+                        </div>
+                        <div className="space-y-1">
+                          <p className="text-xs text-muted-foreground">Uptime</p>
+                          <div className="text-sm">
+                            {formatDistanceToNow(Date.now() - (agentDetails.uptime * 1000))}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
                   ) : (
-                    <div className="rounded-md bg-muted p-4 flex items-center justify-between">
-                      <p className="text-sm">
-                        Current agent: <span className="font-medium">{agentHostname}</span>
-                      </p>
-                      <Button variant="ghost" size="sm" onClick={clearAgentSelection}>
-                        Change Agent
-                      </Button>
+                    <div className="rounded-md bg-muted p-4">
+                      <p className="text-sm text-muted-foreground">Loading agent details...</p>
                     </div>
                   )}
                   

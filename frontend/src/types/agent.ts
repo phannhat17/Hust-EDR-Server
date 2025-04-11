@@ -24,55 +24,51 @@ export interface Agent {
   /**
    * Agent MAC address
    */
-  mac_address?: string;
-  
-  /**
-   * Username running the agent
-   */
-  username?: string;
+  mac_address: string;
   
   /**
    * OS information (simplified)
    */
-  os_info: string;
+  os: string;
   
   /**
-   * Full OS version string
+   * Username running the agent
    */
-  os_version_full?: string;
-  
-  /**
-   * Agent version
-   */
-  version?: string;
-  
-  /**
-   * Agent status (online, offline, etc.)
-   */
-  status: string;
+  username: string;
   
   /**
    * Current CPU usage percentage
    */
-  cpu_usage?: number;
+  cpu_usage: number;
   
   /**
    * Current memory usage percentage
    */
-  memory_usage?: number;
+  memory_usage: number;
   
   /**
    * System uptime in seconds
    */
-  uptime?: number;
+  uptime: number;
   
   /**
-   * Timestamp of last status update (milliseconds)
+   * Agent version
    */
-  last_seen: number;
+  version: string;
   
   /**
    * Timestamp of agent registration (milliseconds)
    */
-  registered_at: number;
+  registered_at: string;
+  
+  /**
+   * Timestamp of last status update (milliseconds)
+   */
+  last_seen: string;
+}
+
+export function isAgentOnline(lastSeen: string): boolean {
+  const lastSeenDate = new Date(lastSeen);
+  const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000); // 10 minutes in milliseconds
+  return lastSeenDate > tenMinutesAgo;
 } 
