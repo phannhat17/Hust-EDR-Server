@@ -65,15 +65,22 @@ export default function Commands() {
     setSelectedAgentId(agentId);
     
     // Update URL with selected agent
-    if (agentId) {
-      router.navigate({
-        to: '/commands',
-        search: {
-          agent_id: agentId
-        },
-        replace: true
-      });
-    }
+    router.navigate({
+      to: '/commands',
+      search: agentId ? { agent_id: agentId } : { agent_id: undefined },
+      replace: true
+    });
+  };
+
+  // Clear agent selection
+  const clearAgentSelection = () => {
+    setSelectedAgentId(null);
+    setAgentHostname(null);
+    router.navigate({
+      to: '/commands',
+      search: { agent_id: undefined },
+      replace: true
+    });
   };
 
   // Filter commands by agent_id if provided
@@ -102,18 +109,19 @@ export default function Commands() {
               
               <TabsContent value="send" className="space-y-4">
                 <div className="space-y-4">
-                  {!agent_id && (
+                  {!agent_id ? (
                     <div className="space-y-2">
                       <label className="text-sm font-medium">Select Agent</label>
                       <AgentSelector onAgentChange={handleAgentChange} selectedAgentId={selectedAgentId || undefined} />
                     </div>
-                  )}
-                  
-                  {agentHostname && agent_id && (
-                    <div className="rounded-md bg-muted p-4">
+                  ) : (
+                    <div className="rounded-md bg-muted p-4 flex items-center justify-between">
                       <p className="text-sm">
                         Current agent: <span className="font-medium">{agentHostname}</span>
                       </p>
+                      <Button variant="ghost" size="sm" onClick={clearAgentSelection}>
+                        Change Agent
+                      </Button>
                     </div>
                   )}
                   
@@ -139,10 +147,19 @@ export default function Commands() {
               
               <TabsContent value="history" className="space-y-4">
                 <div className="space-y-4">
-                  {agentHostname && agent_id && (
-                    <div className="rounded-md bg-muted p-4">
+                  {agentHostname && agent_id ? (
+                    <div className="rounded-md bg-muted p-4 flex items-center justify-between">
                       <p className="text-sm">
                         Showing commands for agent: <span className="font-medium">{agentHostname}</span>
+                      </p>
+                      <Button variant="ghost" size="sm" onClick={clearAgentSelection}>
+                        Show All Commands
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className="rounded-md bg-muted p-4">
+                      <p className="text-sm">
+                        Showing all commands across all agents
                       </p>
                     </div>
                   )}

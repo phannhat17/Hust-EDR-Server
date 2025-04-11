@@ -50,7 +50,6 @@ export default function AgentRegistration() {
     });
   }
 
-  const linuxCommand = `curl -L "${apiHost}/api/agents/installer?token=${agentToken}&name=${agentName || 'edr-agent'}" | sudo bash`;
   const windowsCommand = `powershell -Command "& {Invoke-WebRequest -Uri '${apiHost}/api/agents/installer?token=${agentToken}&name=${agentName || 'edr-agent'}&platform=windows' -OutFile $env:TEMP\\edr-installer.ps1; Start-Process powershell -Verb RunAs -ArgumentList '-ExecutionPolicy Bypass -File $env:TEMP\\edr-installer.ps1'}"`;
 
   return (
@@ -148,29 +147,6 @@ export default function AgentRegistration() {
                   </div>
                   
                   <div className="space-y-4">
-                    <Card>
-                      <CardHeader>
-                        <div className="flex items-center">
-                          <Terminal className="mr-2 h-5 w-5" />
-                          <CardTitle>Linux / macOS</CardTitle>
-                        </div>
-                      </CardHeader>
-                      <CardContent>
-                        <div className="relative">
-                          <pre className="bg-muted rounded-md p-4 overflow-x-auto text-sm">
-                            {linuxCommand}
-                          </pre>
-                          <Button 
-                            variant="ghost" 
-                            size="icon" 
-                            className="absolute top-2 right-2" 
-                            onClick={() => copyToClipboard(linuxCommand, "Linux installation command copied to clipboard")}
-                          >
-                            <Copy className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      </CardContent>
-                    </Card>
                     
                     <Card>
                       <CardHeader>
