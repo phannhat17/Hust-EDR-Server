@@ -41,11 +41,10 @@ def process_alerts(limit=20, dry_run=False):
         dict: Summary of processing results
     """
     # Initialize gRPC server servicer (needed for commands)
-    from app.storage.agent_storage import AgentStorage
-    storage = AgentStorage()
-    grpc_servicer = EDRServicer(storage)
+    from app.grpc.server import EDRServicer
+    grpc_servicer = EDRServicer()
     
-    # Create ElastAlert client with gRPC server
+    # Create ElastAlert client with gRPC servicer
     client = ElastAlertClient(grpc_servicer)
     
     # If dry run, modify the auto_response_handler to not execute commands

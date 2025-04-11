@@ -25,11 +25,11 @@ def create_app():
     
     # Start gRPC server
     from app.grpc.server import start_grpc_server
-    grpc_server = start_grpc_server(port=config.GRPC_PORT)
+    grpc_server, grpc_servicer = start_grpc_server(port=config.GRPC_PORT)
     app.grpc_server = grpc_server
     
-    # Create elastalert client with gRPC server and add to app config
-    elastalert_client = ElastAlertClient(grpc_server.servicer)
+    # Create elastalert client with gRPC servicer and add to app config
+    elastalert_client = ElastAlertClient(grpc_servicer)
     app.config['elastalert_client'] = elastalert_client
     
     # Import blueprints

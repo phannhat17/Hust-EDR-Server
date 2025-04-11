@@ -376,7 +376,7 @@ def start_grpc_server(port=None):
         port (int, optional): Port number to listen on. Defaults to config.GRPC_PORT.
     
     Returns:
-        grpc.Server: The running server instance
+        tuple: The running server instance and servicer
     """
     if port is None:
         port = config.GRPC_PORT
@@ -390,6 +390,8 @@ def start_grpc_server(port=None):
     server.start()
     
     logger.info(f"EDR gRPC server started on port {port}")
+    logger.info(f"Agent information is stored at {servicer.storage.storage_dir}")
     logger.info(f"Agent information is stored at {servicer.storage.agents_file}")
     
-    return server 
+    # Return both the server and servicer
+    return server, servicer 
