@@ -121,7 +121,7 @@ export default function Commands() {
                         <div className="space-y-1">
                           <div className="flex items-center space-x-2">
                             <h3 className="text-sm font-medium">{agentDetails.hostname}</h3>
-                            <Badge variant={isAgentOnline(agentDetails.last_seen) ? "green" : "destructive"}>
+                            <Badge variant={isAgentOnline(agentDetails.last_seen) ? "green" : "black"}>
                               {isAgentOnline(agentDetails.last_seen) ? "Online" : "Offline"}
                             </Badge>
                           </div>
