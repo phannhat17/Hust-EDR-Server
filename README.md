@@ -1,26 +1,10 @@
 # HUST EDR Server
 
-A comprehensive Endpoint Detection and Response (EDR) system consisting of a server and agent components. The system provides real-time security monitoring, command execution capabilities, and network isolation features.
-
-## Project Structure
-
-```
-Hust-EDR-Server/
-├── backend/           # Server component
-│   ├── app/          # Server application code
-│   ├── data/         # Data storage
-│   └── proto/        # Protocol definitions
-└── agent/            # Agent component
-    ├── client/       # Agent client code
-    ├── proto/        # Protocol definitions
-    └── syscollector/ # System information collection
-```
+A comprehensive Endpoint Detection and Response (EDR) system consisting of a server and agent components. The system provides security monitoring, command execution capabilities, and network isolation features.
 
 ## Features
 
-- Real-time agent status monitoring
 - System metrics collection (CPU, memory, disk, network)
-- Remote command execution
 - File operations (delete)
 - Process management (kill process, kill process tree)
 - Network control (block IP, block URL, network isolation)
@@ -33,23 +17,40 @@ Hust-EDR-Server/
 - Docker compose
 - Node.js 16+ and npm & pnpm
 - Elasticsearch instance
-- ElastAlert container (optional, for rule execution)
+- ElastAlert container (for rule execution)
 - Go lang for agent compile or you can use the prebuilt executable available in the Releases section.
-- Go 1.20+
-- gRPC tools for Python
-- Windows or Linux operating system
+- gRPC
 
 ## Quick Start
 
-1. Navigate to the backend directory
+### Backend Setup
+
+1. Install dependencies
    ```
    cd backend
-   python server.py
+   python -m venv .venv
+   pip install -r requirements.txt
+   python -m grpc_tools.protoc -I../agent/proto --python_out=./app/grpc --grpc_python_out=./app/grpc ../agent/proto/agent.proto
+   sed -i 's/import agent_pb2 as agent__pb2/from . import agent_pb2 as agent__pb2/' ./app/grpc/agent_pb2_grpc.py
    ```
+
+2. Configure environment variables in `.env` file (copy from `.env.example`)
+   ```
+   cp .env.example .env
+   # Edit .env file with your configuration
+   ```
+
+3. Run the development server
+   ```
+   source .venv/bin/activate
+   python server.py
+   ``` 
 
 > **Security Note**: The frontend is currently making direct API calls from the browser, which may lead to CORS policy violations and prevent successful communication with the backend. As a temporary workaround, CORS has been disabled to allow these requests. This will be addressed and properly configured in future versions (hopefully 😅).
 
 ### Frontend Setup
+
+> Demo UI [here](./frontend/README.md)
 
 1. Navigate to the frontend directory
    ```
@@ -71,6 +72,26 @@ Hust-EDR-Server/
    ```
    npm run dev -- --host
    ``` 
+
+### Agent Setup
+
+1. Generate gRPC Code:
+   ```bash
+   protoc --go_out=. --go_opt=paths=source_relative \
+       --go-grpc_out=. --go-grpc_opt=paths=source_relative \
+       proto/agent.proto
+   ```
+
+2. Build the Agent:
+   ```bash
+   go mod tidy
+   go build -o edr-agent.exe
+   ```
+
+3. Run agent:
+   ```bash
+   edr-agent.exe -host="IP:PORT"
+   ```
 
 ## License
 
