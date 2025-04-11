@@ -84,12 +84,6 @@ export default function Dashboard() {
           className='space-y-4'
         >
           <div className='w-full overflow-x-auto pb-2'>
-            <TabsList>
-              <TabsTrigger value='overview'>Overview</TabsTrigger>
-              <TabsTrigger value='agents'>Agents</TabsTrigger>
-              <TabsTrigger value='alerts'>Alerts</TabsTrigger>
-              <TabsTrigger value='rules'>Rules</TabsTrigger>
-            </TabsList>
           </div>
           <TabsContent value='overview' className='space-y-4'>
             <div className='grid gap-4 sm:grid-cols-2 lg:grid-cols-4'>
