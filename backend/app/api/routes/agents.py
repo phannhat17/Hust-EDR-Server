@@ -1,7 +1,9 @@
 import logging
 import os
 import json
+import time
 from flask import Blueprint, jsonify, request, current_app
+from app.config.config import config
 
 # Set up logger
 logger = logging.getLogger(__name__)
@@ -26,9 +28,24 @@ def get_agents():
         with open(agents_file, 'r') as f:
             agents_data = json.load(f)
         
+        # Get current time and calculate timeout threshold
+        current_time = int(time.time())
+        timeout_threshold = current_time - config.AGENT_TIMEOUT
+        
+        # Flag to track if we need to update the agents file
+        need_update = False
+        
         # Convert dictionary to list and add 'id' field for frontend compatibility
         agents_list = []
         for agent_id, agent in agents_data.items():
+            # Check if agent has timed out
+            last_seen = agent.get('last_seen', 0)
+            if last_seen < timeout_threshold and agent.get('status') != 'OFFLINE':
+                agent['status'] = 'OFFLINE'
+                # Update the agent in the data
+                agents_data[agent_id] = agent
+                need_update = True
+            
             # Get the OS version and create a simplified version for the table
             full_os_version = agent.get('os_version', 'Unknown')
             simplified_os = full_os_version
@@ -71,6 +88,12 @@ def get_agents():
             }
             agents_list.append(agent_info)
         
+        # If any agents were updated to OFFLINE, save the changes
+        if need_update:
+            with open(agents_file, 'w') as f:
+                json.dump(agents_data, f, indent=2)
+            logger.info("Updated agents with offline status")
+            
         logger.info(f"Found {len(agents_list)} agents")
         return jsonify(agents_list)
         
@@ -100,6 +123,21 @@ def get_agent(agent_id):
         if not agent:
             logger.warning(f"Agent {agent_id} not found")
             return jsonify({"error": "Agent not found"}), 404
+        
+        # Check if agent has timed out
+        current_time = int(time.time())
+        timeout_threshold = current_time - config.AGENT_TIMEOUT
+        
+        last_seen = agent.get('last_seen', 0)
+        if last_seen < timeout_threshold and agent.get('status') != 'OFFLINE':
+            agent['status'] = 'OFFLINE'
+            # Update the agent in the data
+            agents_data[agent_id] = agent
+            
+            # Save the updated status
+            with open(agents_file, 'w') as f:
+                json.dump(agents_data, f, indent=2)
+            logger.info(f"Updated agent {agent_id} to offline status")
         
         # Get the OS version and create a simplified version for the table
         full_os_version = agent.get('os_version', 'Unknown')

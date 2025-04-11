@@ -47,7 +47,7 @@ class Config:
     
     # Agent configuration
     AGENT_HEARTBEAT_INTERVAL = int(os.environ.get('AGENT_HEARTBEAT_INTERVAL', '60'))
-    AGENT_TIMEOUT = int(os.environ.get('AGENT_TIMEOUT', '300'))  # 5 minutes
+    AGENT_TIMEOUT = int(os.environ.get('AGENT_TIMEOUT', '600'))  # 10 minutes
 
     @classmethod
     def get_elasticsearch_config(cls):
