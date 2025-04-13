@@ -154,3 +154,80 @@ backend/
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](../LICENSE) file for details.
+
+# Auto-Response
+
+The EDR system now features a simplified auto-response implementation that automatically executes commands on agents when specific security alerts are detected.
+
+## How It Works
+
+1. ElastAlert generates alerts with special `auto_response_*` fields
+2. The EDR backend processes these alerts and performs the specified actions
+3. Each alert is processed exactly once (no retries)
+4. Alert status is updated in Elasticsearch based on action results
+
+## Key Files
+
+- `backend/app/elastalert_auto_response.py`: Core auto-response handler
+- `backend/app/elastalert.py`: Alert processing logic
+- `backend/elastalert_modules/enhance_auto_response.py`: Example enhancement for adding auto-response fields to alerts
+- `backend/docs/AUTO_RESPONSE_GUIDE.md`: Comprehensive documentation
+
+## Required Fields
+
+For an alert to trigger an auto-response, it must include the following field:
+
+- `auto_response_type`: Action type (e.g., DELETE_FILE, KILL_PROCESS)
+
+Other required fields depend on the action type. See `AUTO_RESPONSE_GUIDE.md` for details.
+
+## Configuration
+
+Auto-response settings can be configured in the `.env` file:
+
+```
+AUTO_RESPONSE_ENABLED=true
+AUTO_RESPONSE_INTERVAL=30
+```
+
+## Testing Auto-Response
+
+Use the API endpoint to test auto-response manually:
+
+```
+POST /api/auto-response/test
+
+{
+  "rule_name": "Test Rule",
+  "auto_response_type": "DELETE_FILE",
+  "auto_response_file_path": "/path/to/file.txt",
+  "host": {
+    "hostname": "example-host-01"
+  }
+}
+```
+
+# Logging System
+
+The EDR server now features a modular logging system that writes different types of logs to separate files. This makes debugging and monitoring much easier.
+
+## Log Files
+
+- `app.log`: Main application logs
+- `api.log`: API endpoint access and operations
+- `grpc.log`: gRPC server interactions with agents
+- `elastalert.log`: ElastAlert rule processing and alerts
+- `auto_response.log`: Auto-response actions and results
+- `db.log`: Database interactions
+- `error.log`: All error-level logs from all components
+
+## Configuration
+
+Configure the logging system in your `.env` file:
+
+```
+LOG_LEVEL=INFO
+LOG_DIR=logs
+```
+
+See [LOGGING.md](docs/LOGGING.md) for detailed documentation.

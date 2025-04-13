@@ -30,12 +30,13 @@ logging.basicConfig(
 
 logger = logging.getLogger('auto_response')
 
-def process_alerts(limit=20, dry_run=False):
+def process_alerts(limit=20, dry_run=False, reprocess=False):
     """Process pending alerts and execute auto-response actions.
     
     Args:
         limit (int): Maximum number of alerts to process
         dry_run (bool): If True, do not execute actions, just report
+        reprocess (bool): If True, include already processed alerts
         
     Returns:
         dict: Summary of processing results
@@ -53,8 +54,8 @@ def process_alerts(limit=20, dry_run=False):
         client.auto_response_handler.execute_commands = False
     
     # Process pending alerts
-    logger.info(f"Processing up to {limit} pending alerts...")
-    results = client.process_pending_alerts(limit)
+    logger.info(f"Processing up to {limit} pending alerts{' (including previously processed)' if reprocess else ''}...")
+    results = client.process_pending_alerts(limit, include_processed=reprocess)
     
     # Log results
     logger.info(f"Alert processing complete: processed={results.get('processed', 0)}, "
@@ -67,12 +68,13 @@ def main():
     parser = argparse.ArgumentParser(description='Process ElastAlert alerts and execute auto-response actions')
     parser.add_argument('--limit', type=int, default=20, help='Maximum number of alerts to process')
     parser.add_argument('--dry-run', action='store_true', help='Do not execute actions, just report')
+    parser.add_argument('--reprocess', action='store_true', help='Process previously handled alerts again')
     parser.add_argument('--output', type=str, help='Output file for results (JSON format)')
     args = parser.parse_args()
     
     try:
         # Process alerts
-        results = process_alerts(args.limit, args.dry_run)
+        results = process_alerts(args.limit, args.dry_run, args.reprocess)
         
         # Print results
         print(json.dumps(results, indent=2))

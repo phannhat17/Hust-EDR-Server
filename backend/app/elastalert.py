@@ -13,7 +13,7 @@ from elasticsearch import Elasticsearch
 from app.config.config import config
 from app.elastalert_auto_response import AutoResponseHandler
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger('app.elastalert')
 
 class ElastAlertClient:
     def __init__(self, grpc_server=None):
@@ -26,12 +26,30 @@ class ElastAlertClient:
         try:
             self.es_client = Elasticsearch(**config.get_elasticsearch_config())
             logger.info(f"Connected to Elasticsearch at {config.ELASTICSEARCH_HOST}:{config.ELASTICSEARCH_PORT}")
+            
+            # Check if the ElastAlert index exists or find available indices
+            try:
+                indices = list(self.es_client.indices.get("*elastalert*").keys())
+                if indices:
+                    logger.info(f"Found ElastAlert indices: {', '.join(indices)}")
+                    # Use the first index if we found any
+                    self.alerts_index = indices[0] 
+                    logger.info(f"Using '{self.alerts_index}' as primary ElastAlert index")
+                else:
+                    # Fall back to config
+                    self.alerts_index = config.ELASTALERT_INDEX
+                    logger.warning(f"No ElastAlert indices found, falling back to configured index: {self.alerts_index}")
+            except Exception as e:
+                # Fall back to config
+                self.alerts_index = config.ELASTALERT_INDEX
+                logger.warning(f"Error detecting ElastAlert indices: {e}, using configured index: {self.alerts_index}")
+                
         except Exception as e:
             logger.error(f"Failed to connect to Elasticsearch: {e}")
             self.es_client = None
+            self.alerts_index = config.ELASTALERT_INDEX
         
         # ElastAlert settings
-        self.alerts_index = config.ELASTALERT_INDEX
         self.rules_dir = config.ELASTALERT_RULES_DIR
         
         # Auto-response handler
@@ -111,7 +129,7 @@ class ElastAlertClient:
         
         Args:
             alert_id (str): ID of the alert to update
-            status (str): New status (new, in_review, in_progress, resolved, false_positive)
+            status (str): New status (new, in_review, in_progress, resolved, false_positive, processed)
             notes (str, optional): Analysis notes
             assigned_to (str, optional): Analyst assigned to the alert
             
@@ -139,16 +157,48 @@ class ElastAlertClient:
             doc["edr_resolved_at"] = datetime.now().isoformat()
         elif status == "in_progress":
             doc["edr_in_progress_at"] = datetime.now().isoformat()
+        elif status == "processed":
+            doc["edr_processed_at"] = datetime.now().isoformat()
             
         try:
-            self.es_client.update(
+            logger.info(f"Updating alert {alert_id} with status '{status}' in index {self.alerts_index}")
+            
+            # Try to update the document
+            result = self.es_client.update(
                 index=self.alerts_index,
                 id=alert_id,
-                body={"doc": doc}
+                body={"doc": doc},
+                retry_on_conflict=3
             )
+            
+            logger.info(f"Alert update result: {result.get('result', 'unknown')}")
             return True
         except Exception as e:
             logger.error(f"Error updating alert status: {e}")
+            
+            # Try to update in the broader index pattern if the first attempt failed
+            try:
+                broader_indices = list(self.es_client.indices.get("*elastalert*").keys())
+                for index in broader_indices:
+                    if index == self.alerts_index:
+                        continue
+                        
+                    try:
+                        logger.info(f"Trying to update alert in alternative index: {index}")
+                        result = self.es_client.update(
+                            index=index,
+                            id=alert_id,
+                            body={"doc": doc},
+                            retry_on_conflict=3
+                        )
+                        logger.info(f"Alert update succeeded in index {index}")
+                        return True
+                    except Exception as inner_e:
+                        logger.debug(f"Failed to update in index {index}: {inner_e}")
+                        continue
+            except Exception as outer_e:
+                logger.error(f"Error searching for alternative indices: {outer_e}")
+                
             return False
     
     def get_rules(self):
@@ -341,68 +391,104 @@ class ElastAlertClient:
             logger.error(f"Error restarting ElastAlert container: {e}")
             return False
     
-    def process_alert_auto_response(self, alert):
-        """Process an alert with auto-response actions if applicable.
+    def process_alert_auto_response(self, alert_id, alert_data):
+        """Process a single alert for auto-response actions.
         
         Args:
-            alert (dict): The alert data
+            alert_id: The ID of the alert to process
+            alert_data: Dictionary containing the alert data
             
         Returns:
-            dict: Information about actions taken
+            dict: Result of the auto-response processing
         """
-        # Get the rule that triggered this alert
-        rule_name = alert.get('rule_name', '')
-        if not rule_name:
-            logger.warning("Alert has no rule_name, can't process auto-response")
-            return {"success": False, "message": "No rule name in alert"}
-            
-        # Try to find the rule file
-        rule = None
-        for r in self.get_rules():
-            if r.get('name') == rule_name:
-                rule = r
-                break
-                
-        if not rule:
-            logger.warning(f"Rule not found for alert: {rule_name}")
-            return {"success": False, "message": f"Rule not found: {rule_name}"}
-            
-        # Process auto-response
         try:
-            result = self.auto_response_handler.process_alert(alert, rule)
+            logger.info(f"Processing auto-response for alert {alert_id}")
             
-            # Update alert with auto-response result if successful
-            if result.get("success", False) and 'response_info' in result:
-                self.update_alert_status(
-                    alert['id'],
-                    "in_progress",
-                    notes=f"Auto-response actions executed: {json.dumps(result['response_info'])}",
-                    assigned_to="Auto-response System"
-                )
+            # Get rule name and raw data
+            rule_name = alert_data.get('rule_name', 'Unknown Rule')
+            raw_data = alert_data.get('raw_data', {})
+            
+            # Check if this alert has auto-response field
+            auto_response_type = raw_data.get('auto_response_type')
+            
+            result = {
+                "alert_id": alert_id,
+                "rule": rule_name,
+                "status": "failed",
+                "action": auto_response_type,
+                "details": "No auto-response type defined",
+                "timestamp": datetime.utcnow().isoformat()
+            }
+            
+            # Skip if no auto-response type defined
+            if not auto_response_type:
+                logger.warning(f"No auto_response_type field defined for alert {alert_id}")
+                return result
+            
+            # Create auto-response handler
+            handler = AutoResponseHandler(self.grpc_server)
+            
+            # Execute the auto-response action (single attempt only)
+            action_result = handler.execute_action(raw_data)
+            
+            # Update result with action info
+            result["action"] = auto_response_type
+            result["details"] = action_result.get("message", "No details provided")
+            
+            # Update alert status based on action result
+            if action_result.get("success", False):
+                result["status"] = "success"
+                logger.info(f"Auto-response successful for alert {alert_id}: {result['details']}")
                 
+                # Mark the alert as processed in Elasticsearch
+                try:
+                    update_result = self.update_alert_status(alert_id, "processed", 
+                                    notes=f"Auto-response action '{auto_response_type}' executed successfully: {action_result.get('message')}")
+                    logger.info(f"Updated alert {alert_id} status to 'processed': {update_result}")
+                except Exception as e:
+                    logger.error(f"Error updating alert status after successful auto-response: {e}")
+            else:
+                logger.error(f"Auto-response failed for alert {alert_id}: {result['details']}")
+                
+                # Mark the alert as failed in Elasticsearch
+                try:
+                    update_result = self.update_alert_status(alert_id, "failed", 
+                                    notes=f"Auto-response action '{auto_response_type}' failed: {result['details']}")
+                    logger.info(f"Updated alert {alert_id} status to 'failed': {update_result}")
+                except Exception as e:
+                    logger.error(f"Error updating alert status after failed auto-response: {e}")
+            
             return result
         except Exception as e:
-            logger.error(f"Error processing auto-response for alert: {e}")
-            import traceback
-            logger.error(traceback.format_exc())
-            return {"success": False, "message": f"Error: {str(e)}"}
+            logger.exception(f"Error processing auto-response for alert {alert_id}: {str(e)}")
+            return {
+                "alert_id": alert_id,
+                "rule": alert_data.get('rule_name', 'Unknown Rule'),
+                "status": "error",
+                "action": raw_data.get('auto_response_type'),
+                "details": f"Error processing auto-response: {str(e)}",
+                "timestamp": datetime.utcnow().isoformat()
+            }
     
-    def process_pending_alerts(self, limit=20):
+    def process_pending_alerts(self, limit=20, include_processed=False):
         """Process pending alerts with auto-response.
         
         Args:
             limit (int): Maximum number of alerts to process
+            include_processed (bool): Whether to include already processed alerts
             
         Returns:
             dict: Summary of processing results
         """
-        # Get new alerts
+        # Construct query based on parameters
         query = {
             "query": {
                 "bool": {
                     "must": [
-                        {"match": {"edr_status": "new"}}
-                    ]
+                        {"exists": {"field": "rule_name"}},
+                        {"exists": {"field": "auto_response_type"}}  # Only include alerts with auto_response_type
+                    ],
+                    "must_not": []
                 }
             },
             "sort": [
@@ -411,10 +497,29 @@ class ElastAlertClient:
             "size": limit
         }
         
+        # If we should only process new alerts
+        if not include_processed:
+            # Don't process alerts that have already been processed
+            query["query"]["bool"]["must_not"].append(
+                {"match": {"edr_status": "processed"}}
+            )
+        
         try:
+            # Log the index we're searching
+            logger.info(f"Searching for alerts with auto_response_type in Elasticsearch index: {self.alerts_index}")
+            
             # Check if index exists
             if not self.es_client or not self.es_client.indices.exists(index=self.alerts_index):
+                logger.error(f"Index {self.alerts_index} does not exist or Elasticsearch not connected")
                 return {"processed": 0, "success": 0, "error": "Index does not exist or not connected"}
+                
+            # Try to find all indices that might contain alerts
+            try:
+                indices_info = self.es_client.indices.get('*elastalert*')
+                if indices_info:
+                    logger.info(f"Found ElastAlert indices: {', '.join(indices_info.keys())}")
+            except Exception as e:
+                logger.warning(f"Could not list ElastAlert indices: {e}")
                 
             # Search for new alerts
             response = self.es_client.search(
@@ -423,27 +528,71 @@ class ElastAlertClient:
             )
             
             hits = response['hits']['hits']
-            logger.info(f"Found {len(hits)} new alerts to process for auto-response")
+            logger.info(f"Found {len(hits)} alerts with auto_response_type field")
+            
+            # Keep track of already seen alert IDs to avoid duplicates
+            processed_ids = set()
+            
+            # If no alerts found, try searching with a broader pattern
+            if len(hits) == 0:
+                try:
+                    broader_response = self.es_client.search(
+                        index="*elastalert*",
+                        body=query
+                    )
+                    broader_hits = broader_response['hits']['hits']
+                    logger.info(f"Broader search found {len(broader_hits)} alerts with auto_response_type")
+                    
+                    if len(broader_hits) > 0:
+                        hits = broader_hits
+                        logger.info(f"Using alerts from broader search pattern '*elastalert*'")
+                except Exception as e:
+                    logger.warning(f"Error in broader search: {e}")
             
             results = {
                 "processed": len(hits),
                 "success": 0,
                 "failed": 0,
+                "skipped": 0,
                 "details": []
             }
             
             # Process each alert
             for hit in hits:
+                alert_id = hit['_id']
+                
+                # Skip if we've already processed this alert in this batch
+                if alert_id in processed_ids:
+                    logger.info(f"Skipping duplicate alert {alert_id} (already processed in this batch)")
+                    results["processed"] -= 1
+                    results["skipped"] += 1
+                    continue
+                    
+                # Add ID to processed set
+                processed_ids.add(alert_id)
+                
+                # Skip if alert already has processed status and we're not reprocessing
+                if not include_processed and hit['_source'].get('edr_status') == 'processed':
+                    logger.info(f"Skipping already processed alert {alert_id}")
+                    results["processed"] -= 1
+                    results["skipped"] += 1
+                    continue
+                
                 alert = {
-                    'id': hit['_id'],
+                    'id': alert_id,
                     'timestamp': hit['_source'].get('@timestamp', ''),
                     'rule_name': hit['_source'].get('rule_name', 'Unknown Rule'),
                     'raw_data': hit['_source']
                 }
                 
-                result = self.process_alert_auto_response(alert)
+                # Log the alert data for debugging
+                logger.info(f"Processing alert {alert['id']} from rule '{alert['rule_name']}'")
+                logger.debug(f"Alert data: {json.dumps(alert['raw_data'])}")
                 
-                if result.get("success", False):
+                # Process the alert once - no retries
+                result = self.process_alert_auto_response(alert_id, alert)
+                
+                if result.get("status") == "success":
                     results["success"] += 1
                 else:
                     results["failed"] += 1
@@ -451,9 +600,10 @@ class ElastAlertClient:
                 results["details"].append({
                     "alert_id": alert['id'],
                     "rule_name": alert['rule_name'],
-                    "success": result.get("success", False),
-                    "message": result.get("message", ""),
-                    "response_info": result.get("response_info", {})
+                    "status": result.get("status", "unknown"),
+                    "action": result.get("action", "unknown"),
+                    "details": result.get("details", "No details provided"),
+                    "timestamp": result.get("timestamp", datetime.utcnow().isoformat())
                 })
                 
             return results

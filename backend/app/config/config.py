@@ -38,12 +38,17 @@ class Config:
     ELASTALERT_DOCKER = os.environ.get('ELASTALERT_DOCKER', 'true').lower() == 'true'
     ELASTALERT_CONTAINER = os.environ.get('ELASTALERT_CONTAINER', 'elastalert')
     
-    # gRPC server configuration
-    GRPC_PORT = int(os.environ.get('GRPC_PORT', '50051'))
+    # Auto-response configuration
+    AUTO_RESPONSE_ENABLED = os.environ.get('AUTO_RESPONSE_ENABLED', 'true').lower() == 'true'
+    AUTO_RESPONSE_INTERVAL = int(os.environ.get('AUTO_RESPONSE_INTERVAL', '30'))
     
     # Logging configuration
     LOG_LEVEL = os.environ.get('LOG_LEVEL', 'INFO')
     LOG_FORMAT = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    LOG_DIR = os.environ.get('LOG_DIR', os.path.join(BASE_DIR, 'logs'))
+    
+    # gRPC server configuration
+    GRPC_PORT = int(os.environ.get('GRPC_PORT', '50051'))
     
     # Agent configuration
     AGENT_HEARTBEAT_INTERVAL = int(os.environ.get('AGENT_HEARTBEAT_INTERVAL', '60'))

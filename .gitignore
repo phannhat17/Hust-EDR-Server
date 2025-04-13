@@ -27,3 +27,5 @@ agent.pb.go
 go.sum
 
 backend/data/*
+auto_response.log
+config.yaml

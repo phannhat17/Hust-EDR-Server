@@ -327,6 +327,12 @@ class EDRServicer(agent_pb2_grpc.EDRServiceServicer):
                     logger.warning(error_msg)
                     return agent_pb2.SendCommandResponse(success=False, message=error_msg)
             
+            # Check agent online status based on timestamp, not just streams
+            is_online = False
+            current_time = int(time.time())
+            if (current_time - agent.get('last_seen', 0)) < 300:  # Consider online if seen in last 5 minutes
+                is_online = True
+                
             # Add command to pending commands for the agent
             with self.stream_lock:
                 if agent_id not in self.pending_commands:
@@ -334,8 +340,11 @@ class EDRServicer(agent_pb2_grpc.EDRServiceServicer):
                 
                 self.pending_commands[agent_id].append(command)
                 
-                if agent_id in self.active_streams:
+                # Check for active stream
+                if agent_id in self.active_streams and self.active_streams[agent_id] is not None:
                     logger.info(f"Agent {agent_id} is online, command will be delivered on next poll")
+                elif is_online:
+                    logger.info(f"Agent {agent_id} is considered online but stream not found. Command queued and will be delivered when agent reconnects.")
                 else:
                     logger.info(f"Agent {agent_id} is not currently connected, command queued for later delivery")
             
