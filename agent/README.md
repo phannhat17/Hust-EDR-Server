@@ -1,104 +1,123 @@
-# HUST EDR Agent
+# EDR Agent
 
-The agent component of the HUST EDR system, providing system monitoring, command execution, and network control capabilities.
+The EDR Agent is a Windows-based endpoint detection and response agent that combines three components:
+1. Sysmon - For detailed system monitoring
+2. Winlogbeat - For log collection and forwarding
+3. Custom Agent - For real-time monitoring and response
 
-## Features
+## Installation
 
-- System information collection
-- Real-time status reporting
-- Command execution
-- File operations
-- Process management
-- Network control
-- Secure gRPC communication
+The agent is installed using a PowerShell script that sets up all components. The installation requires administrator privileges.
+
+### Prerequisites
+
+- Windows 10/11 or Windows Server 2016/2019/2022
+- Administrator privileges
+- PowerShell 5.1 or later
+- .NET Framework 4.7.2 or later
+
+### Installation Process
+
+1. Download the agent package
+2. Extract the files to a temporary location
+3. Run the installation script as administrator:
+
+```powershell
+.\install.ps1 -ElkServer "your-elk-server" -ElkPort "9200" -ElkUsername "elastic" -ElkPassword "your-password"
+```
+
+Optional parameters:
+- `-AgentId`: Custom agent ID (default: auto-generated GUID)
+- `-InstallPath`: Installation directory (default: "C:\Program Files\EDR Agent")
+
+### Components
+
+#### Sysmon
+- Installed with predefined security-focused configuration
+- Monitors system activity and process creation
+- Logs to Windows Event Log
+
+#### Winlogbeat
+- Collects and forwards Windows Event Logs
+- Configured to send logs to Elasticsearch
+- Uses SSL/TLS for secure communication
+- Includes custom fields for agent identification
+
+#### Custom Agent
+- Installed as a Windows service
+- Communicates with the EDR server
+- Performs real-time monitoring and response
+- Handles auto-response actions
 
 ## Directory Structure
 
 ```
 agent/
-├── client/           # gRPC client implementation
-├── proto/           # Protocol definitions
-├── syscollector/    # System information collection
-├── config/          # Configuration
-└── main.go          # Agent entry point
+├── install/                    # Installation scripts and resources
+│   ├── sysmon/                # Sysmon installation files
+│   │   ├── sysmon.exe         # Sysmon executable
+│   │   └── sysmon-config.xml  # Predefined Sysmon configuration
+│   ├── winlogbeat/            # Winlogbeat installation files
+│   │   ├── winlogbeat.exe     # Winlogbeat executable
+│   │   ├── winlogbeat.yml     # Template configuration
+│   │   └── elk-ca.pem         # ELK server certificate
+│   └── install.ps1            # Main PowerShell installation script
+└── src/                       # Agent source code
+    ├── main.go
+    ├── go.mod
+    ├── client/
+    ├── proto/
+    ├── collector/
+    └── config/
 ```
 
-## Requirements
+## Configuration
 
-- Go 1.20+
-- Windows or Linux operating system
-- Administrative privileges for certain operations
+### Winlogbeat Configuration
+The Winlogbeat configuration is generated during installation with the following parameters:
+- ELK server address and port
+- Authentication credentials
+- Agent ID
+- SSL/TLS settings
 
-## Building
+### Agent Configuration
+The agent configuration is stored in the installation directory and includes:
+- Server connection details
+- Monitoring settings
+- Auto-response rules
 
-1. **Generate gRPC Code**:
-   ```bash
-   protoc --go_out=. --go_opt=paths=source_relative \
-       --go-grpc_out=. --go-grpc_opt=paths=source_relative \
-       proto/agent.proto
-   ```
+## Troubleshooting
 
-2. **Build the Agent**:
-   ```bash
-   go mod tidy
-   go build -o edr-agent.exe
-   ```
+### Common Issues
 
-## Usage
+1. **Installation Fails**
+   - Ensure running as administrator
+   - Check PowerShell execution policy
+   - Verify network connectivity to ELK server
 
-Run the agent with the following options:
+2. **Winlogbeat Service Not Starting**
+   - Check configuration file syntax
+   - Verify ELK server connectivity
+   - Check Windows Event Log for errors
 
-```bash
-./edr-agent.exe [options]
-```
+3. **Agent Service Issues**
+   - Check agent logs in installation directory
+   - Verify server connectivity
+   - Check Windows Event Log for service errors
 
-Options:
-- `-server`: Server address (default: localhost:50051)
-- `-interval`: Status update interval in seconds (default: 60)
-- `-tls`: Enable TLS (default: false)
-- `-insecure`: Skip TLS verification (default: false)
+### Logs
 
-Example:
-```bash
-./edr-agent.exe -server=localhost:50051 -interval=30
-```
-
-## Supported Commands
-
-The agent can execute the following commands:
-
-1. **File Operations**:
-   - Delete file
-
-2. **Process Management**:
-   - Kill process
-   - Kill process tree
-
-3. **Network Control**:
-   - Block IP address
-   - Block URL
-   - Network isolation
-   - Network restoration
-
-## System Information Collection
-
-The agent collects:
-- CPU usage
-- Memory usage
-- Disk usage
-- Network traffic
-- System information (hostname, OS, etc.)
+- Sysmon logs: Windows Event Log -> Applications and Services Logs -> Microsoft -> Windows -> Sysmon
+- Winlogbeat logs: Windows Event Log -> Applications and Services Logs -> Winlogbeat
+- Agent logs: Installation directory -> logs folder
 
 ## Security
 
-- All communication with the server is done via gRPC
-- TLS support for secure communication
-- Administrative privileges required for certain operations
+- All components use secure communication (TLS)
+- Sensitive credentials are stored securely
+- Services run with least privilege
+- Regular security updates recommended
 
-## Protocol
+## Development
 
-The agent uses gRPC for communication with the server. See `proto/agent.proto` for the protocol definition.
-
-## License
-
-This project is licensed under the MIT License - see the [LICENSE](../LICENSE) file for details. 
+For development and building the agent, see the `src` directory README. 
