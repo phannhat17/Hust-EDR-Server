@@ -18,6 +18,7 @@ $winlogbeatDir = "C:\Program Files\Winlogbeat"
 $tempDir = "$env:TEMP\WinlogbeatInstall"
 $winlogbeatZip = "$tempDir\winlogbeat.zip"
 $configFile = "$winlogbeatDir\winlogbeat.yml"
+$tempConfigFile = "$tempDir\winlogbeat.yml" # Temporary location for config
 $cert1File = "$winlogbeatDir\kibana.crt"
 $cert2File = "$winlogbeatDir\elasticsearch.crt"
 
@@ -72,9 +73,9 @@ try {
     }
 }
 
-# Download configuration file
+# Download configuration file to temp location first
 Write-Host "Downloading Winlogbeat configuration from $configUrl..."
-Download-File -Url $configUrl -OutputFile $configFile
+Download-File -Url $configUrl -OutputFile $tempConfigFile
 
 # Download certificates
 Write-Host "Downloading certificates..."
@@ -97,6 +98,10 @@ $extractedPath = $extractedDir.FullName
 # Copy all files from the extracted directory to the installation directory
 Write-Host "Copying files to $winlogbeatDir..."
 Copy-Item -Path "$extractedPath\*" -Destination $winlogbeatDir -Recurse -Force
+
+# Now copy the custom configuration file to replace the default one
+Write-Host "Applying custom Winlogbeat configuration..."
+Copy-Item -Path $tempConfigFile -Destination $configFile -Force
 
 # Install Winlogbeat service
 Write-Host "Installing Winlogbeat service..."
