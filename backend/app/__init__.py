@@ -70,6 +70,8 @@ logger.info(f"Logging initialized with level {config.LOG_LEVEL} in directory {lo
 # Global flag to control the background thread
 auto_response_running = False
 auto_response_thread = None
+grpc_server = None
+grpc_servicer = None
 
 def alert_processor_thread(elastalert_client, interval=30):
     """Background thread to periodically process alerts with auto-response."""
@@ -119,8 +121,14 @@ def create_app():
     app.config.from_object(config)
     
     # Initialize ElastAlert client
-    from app.grpc.server import EDRServicer
-    grpc_servicer = EDRServicer()
+    from app.grpc.server import EDRServicer, start_grpc_server
+    
+    # Start the gRPC server in a separate thread
+    global grpc_server, grpc_servicer
+    grpc_port = config.GRPC_PORT
+    grpc_server, grpc_servicer = start_grpc_server(grpc_port)
+    logger.info(f"gRPC server started on port {grpc_port}")
+    
     elastalert_client = ElastAlertClient(grpc_servicer)
     app.config['elastalert_client'] = elastalert_client
     
@@ -155,6 +163,8 @@ def create_app():
         return jsonify({
             "status": "ok",
             "service": "EDR Backend API",
+            "grpc_server": "running" if grpc_server else "not running",
+            "grpc_port": config.GRPC_PORT,
             "auto_response": "enabled" if config.AUTO_RESPONSE_ENABLED else "disabled"
         })
         
@@ -171,12 +181,17 @@ def create_app():
 
 def shutdown_background_threads():
     """Shutdown background threads gracefully."""
-    global auto_response_running, auto_response_thread
+    global auto_response_running, auto_response_thread, grpc_server
     
     if auto_response_running and auto_response_thread:
         logger.info("Shutting down auto-response background thread...")
         auto_response_running = False
         auto_response_thread.join(timeout=10)
         logger.info("Auto-response background thread stopped")
+    
+    if grpc_server:
+        logger.info("Shutting down gRPC server...")
+        grpc_server.stop(grace=5)
+        logger.info("gRPC server stopped")
 
-__all__ = ['create_app'] 
+__all__ = ['create_app']

@@ -34,7 +34,8 @@ class Config:
     
     # ElastAlert configuration
     ELASTALERT_INDEX = os.environ.get('ELASTALERT_INDEX', 'elastalert_status')
-    ELASTALERT_RULES_DIR = os.path.join(BASE_DIR, os.environ.get('ELASTALERT_RULES_DIR', 'elastalert_rules'))
+    ELASTALERT_RULES_DIR = os.path.join(BASE_DIR, os.environ.get('ELASTALERT_RULES_DIR', 'elastalert/rules'))
+    print(ELASTALERT_RULES_DIR, flush=True)
     ELASTALERT_DOCKER = os.environ.get('ELASTALERT_DOCKER', 'true').lower() == 'true'
     ELASTALERT_CONTAINER = os.environ.get('ELASTALERT_CONTAINER', 'elastalert')
     

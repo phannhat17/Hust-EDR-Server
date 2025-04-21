@@ -147,7 +147,7 @@ processors:
   - add_fields:
       target: ''
       fields:
-        "edr.id": '574734885120952459'
+        "edr_id": '<edr agent id go there>'
   - add_host_metadata:
       when.not.contains.tags: forwarded
   - add_cloud_metadata: ~
