@@ -129,11 +129,13 @@ def create_app():
     from app.api.routes.agents import agents_bp
     from app.api.routes.alerts import alerts_bp
     from app.api.routes.auto_response import auto_response_bp
+    from app.api.routes.install import install_bp
     
     app.register_blueprint(rules_bp, url_prefix='/api/rules')
     app.register_blueprint(agents_bp, url_prefix='/api/agents')
     app.register_blueprint(alerts_bp, url_prefix='/api/alerts')
     app.register_blueprint(auto_response_bp, url_prefix='/api/auto-response')
+    app.register_blueprint(install_bp, url_prefix='/api/install')
     
     # Start auto-response background thread if enabled
     global auto_response_running, auto_response_thread
