@@ -65,7 +65,7 @@ if [ "$ELASTICSEARCH_USE_SSL" = "true" ]; then
     cat >> elastalert/config/config.yaml << EOL
 use_ssl: true
 verify_certs: true
-ca_certs: /opt/cacert.pem
+ca_certs: /opt/elasticsearch.crt
 EOL
 fi
 
@@ -100,7 +100,7 @@ DOCKER_CMD="docker run --net="host" -d --name elastalert --restart=always \
 -v $(pwd)/elastalert/config/config.yaml:/opt/elastalert/config.yaml \
 -v $(pwd)/elastalert/rules:/opt/elastalert/rules \
 -v $(pwd)/elastalert/modules:/opt/elastalert/modules \
--v $(pwd)/cacert.pem:/opt/cacert.pem \
+-v $(pwd)/cert/elasticsearch.crt:/opt/elasticsearch.crt \
 jertel/elastalert2 --verbose"
 
 echo "Running command: $DOCKER_CMD"
