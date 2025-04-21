@@ -8,7 +8,7 @@ import logging.handlers
 import threading
 import time
 from pathlib import Path
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, abort
 from flask_cors import CORS
 from app.config.config import config
 from app.elastalert import ElastAlertClient
@@ -67,7 +67,7 @@ root_logger.addHandler(error_handler)
 logger = logging.getLogger('app')
 logger.info(f"Logging initialized with level {config.LOG_LEVEL} in directory {log_dir}")
 
-# Global flag to control the background thread
+# Global variables
 auto_response_running = False
 auto_response_thread = None
 grpc_server = None
@@ -110,12 +110,23 @@ def alert_processor_thread(elastalert_client, interval=30):
         
     auto_logger.info("Alert processor thread stopped")
 
+def api_key_required(f):
+    """Decorator to require API key for routes."""
+    def decorated_function(*args, **kwargs):
+        api_key = request.headers.get(config.API_KEY_HEADER)
+        if api_key != config.API_KEY:
+            logger.warning(f"Unauthorized access attempt from {request.remote_addr} - invalid API key")
+            abort(401, description="Invalid API key")
+        return f(*args, **kwargs)
+    decorated_function.__name__ = f.__name__
+    return decorated_function
+
 def create_app():
     """Create and configure the Flask app."""
     app = Flask(__name__)
     
     # Enable CORS
-    CORS(app)
+    CORS(app, resources={r"/*": {"origins": "*"}})
     
     # Load config settings
     app.config.from_object(config)
@@ -138,12 +149,44 @@ def create_app():
     from app.api.routes.alerts import alerts_bp
     from app.api.routes.auto_response import auto_response_bp
     from app.api.routes.install import install_bp
+    from app.api.routes.dashboard import dashboard_bp
     
     app.register_blueprint(rules_bp, url_prefix='/api/rules')
     app.register_blueprint(agents_bp, url_prefix='/api/agents')
     app.register_blueprint(alerts_bp, url_prefix='/api/alerts')
     app.register_blueprint(auto_response_bp, url_prefix='/api/auto-response')
     app.register_blueprint(install_bp, url_prefix='/api/install')
+    app.register_blueprint(dashboard_bp, url_prefix='/api/dashboard')
+    
+    # API key middleware for all API routes
+    @app.before_request
+    def check_api_key():
+        # Skip API key check for health check endpoint and root
+        if request.path == '/health' or request.path == '/':
+            return
+            
+        # Skip API key check for install endpoints (needed for agent installation)
+        if request.path.startswith('/api/install'):
+            return
+            
+        # Skip OPTIONS requests (for CORS preflight)
+        if request.method == 'OPTIONS':
+            return
+            
+        # Check API key for all other API endpoints
+        if request.path.startswith('/api/'):
+            api_key = request.headers.get(config.API_KEY_HEADER)
+            if api_key != config.API_KEY:
+                logger.warning(f"Unauthorized access attempt from {request.remote_addr} - invalid API key")
+                return jsonify({"error": "Unauthorized - Invalid API key"}), 401
+    
+    # Health check endpoint (no auth required)
+    @app.route('/health')
+    def health_check():
+        return jsonify({
+            "status": "healthy",
+            "timestamp": int(time.time())
+        })
     
     # Start auto-response background thread if enabled
     global auto_response_running, auto_response_thread
@@ -172,6 +215,10 @@ def create_app():
     @app.errorhandler(404)
     def not_found(e):
         return jsonify({"error": "Not found"}), 404
+        
+    @app.errorhandler(401)
+    def unauthorized(e):
+        return jsonify({"error": "Unauthorized"}), 401
         
     @app.errorhandler(500)
     def server_error(e):
