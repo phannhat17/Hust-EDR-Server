@@ -17,20 +17,6 @@ def get_sysmon_script():
     script_path = os.path.join(SCRIPT_DIR, 'install_sysmon.ps1')
     return send_file(script_path, mimetype='text/plain')
 
-@install_bp.route('/sysmon-oneliner', methods=['GET'])
-def get_sysmon_oneliner():
-    """Provide a one-liner PowerShell command to download and run the script."""
-    # Get server address from request
-    server_host = request.host
-    
-    # Create the one-liner with the current server address (fixed syntax)
-    oneliner = f"powershell -Command \"[System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; Invoke-Expression ((New-Object System.Net.WebClient).DownloadString('http://{server_host}/api/install/sysmon-script'))\""
-    
-    # Return as plain text
-    response = make_response(oneliner)
-    response.headers['Content-Type'] = 'text/plain'
-    return response
-
 # Winlogbeat routes
 @install_bp.route('/winlogbeat-script', methods=['GET'])
 def get_winlogbeat_script():
@@ -72,17 +58,20 @@ def get_elasticsearch_cert():
     cert_path = os.path.join(CERT_DIR, 'elasticsearch.crt')
     return send_file(cert_path, mimetype='application/x-x509-ca-cert')
 
-@install_bp.route('/winlogbeat-oneliner', methods=['GET'])
-def get_winlogbeat_oneliner():
-    """Provide a one-liner PowerShell command to download and run the Winlogbeat script."""
-    # Get server address from request
-    server_host = request.host
+# Combined Sysmon + Winlogbeat routes
+@install_bp.route('/combined-script/<host>', methods=['GET'])
+def get_combined_script_with_host(host):
+    """Serve the combined installation script with the server host parameter embedded."""
+    script_path = os.path.join(SCRIPT_DIR, 'install_combined.ps1')
+    with open(script_path, 'r') as f:
+        script_content = f.read()
     
-    # Create a one-liner using Invoke-Expression exactly like the Sysmon command
-    oneliner = f"powershell -Command \"[System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; Invoke-Expression ((New-Object System.Net.WebClient).DownloadString('http://{server_host}/api/install/winlogbeat-script-with-host/{server_host}'))\""
+    # Modify the script to include the server host parameter
+    modified_script = script_content.replace('param(\n    [string]$ServerHost = "localhost:5000"\n)', f'# Server host is embedded: {host}')
+    modified_script = modified_script.replace('$ServerHost', f'{host}')
     
     # Return as plain text
-    response = make_response(oneliner)
+    response = make_response(modified_script)
     response.headers['Content-Type'] = 'text/plain'
     return response
 
@@ -91,28 +80,9 @@ def get_install_info():
     """Provide installation instructions."""
     server_host = request.host
     
-    # Fixed command syntax for the one-liner
-    fixed_sysmon_oneliner = f"powershell -Command \"[System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; Invoke-Expression ((New-Object System.Net.WebClient).DownloadString('http://{server_host}/api/install/sysmon-script'))\""
+    # Combined installation one-liner
+    combined_oneliner = f"""powershell -Command "[System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; Invoke-Expression ((New-Object System.Net.WebClient).DownloadString('http://{server_host}/api/install/combined-script/{server_host}'))" """
     
-    # Updated Winlogbeat one-liner that uses the same pattern as Sysmon
-    winlogbeat_oneliner = f"powershell -Command \"[System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; Invoke-Expression ((New-Object System.Net.WebClient).DownloadString('http://{server_host}/api/install/winlogbeat-script-with-host/{server_host}'))\""
-    
-    return jsonify({
-        "sysmon": {
-            "instructions": "Copy and paste this command into an administrator PowerShell prompt to install Sysmon:",
-            "one_liner": fixed_sysmon_oneliner,
-            "one_liner_url": f"http://{server_host}/api/install/sysmon-oneliner",
-            "script_url": f"http://{server_host}/api/install/sysmon-script",
-            "note": "The installation requires administrator privileges and will install Sysmon to C:\\Program Files\\Sysmon"
-        },
-        "winlogbeat": {
-            "instructions": "Copy and paste this command into an administrator PowerShell prompt to install Winlogbeat:",
-            "one_liner": winlogbeat_oneliner,
-            "one_liner_url": f"http://{server_host}/api/install/winlogbeat-oneliner",
-            "script_url": f"http://{server_host}/api/install/winlogbeat-script",
-            "config_url": f"http://{server_host}/api/install/winlogbeat-config",
-            "cert1_url": f"http://{server_host}/api/install/kibana-cert",
-            "cert2_url": f"http://{server_host}/api/install/elasticsearch-cert",
-            "note": "The installation requires administrator privileges and will install Winlogbeat to C:\\Program Files\\Winlogbeat"
-        }
-    }) 
+    response = make_response(combined_oneliner)
+    response.headers['Content-Type'] = 'text/plain'
+    return response
