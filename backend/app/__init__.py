@@ -150,6 +150,7 @@ def create_app():
     from app.api.routes.auto_response import auto_response_bp
     from app.api.routes.install import install_bp
     from app.api.routes.dashboard import dashboard_bp
+    from app.api.routes.commands import commands_bp
     
     app.register_blueprint(rules_bp, url_prefix='/api/rules')
     app.register_blueprint(agents_bp, url_prefix='/api/agents')
@@ -157,6 +158,7 @@ def create_app():
     app.register_blueprint(auto_response_bp, url_prefix='/api/auto-response')
     app.register_blueprint(install_bp, url_prefix='/api/install')
     app.register_blueprint(dashboard_bp, url_prefix='/api/dashboard')
+    app.register_blueprint(commands_bp, url_prefix='/api/commands')
     
     # API key middleware for all API routes
     @app.before_request
