@@ -4,12 +4,11 @@
 set -e
 
 # Default values
-ELASTICSEARCH_HOST="192.168.133.134"
+ELASTICSEARCH_HOST=""
 ELASTICSEARCH_PORT="9200"
-ELASTICSEARCH_USER="elastic"
-ELASTICSEARCH_PASSWORD="Z1ILMKtVy_3PFRU9Dlpm"
+ELASTICSEARCH_USER=""
+ELASTICSEARCH_PASSWORD=""
 ELASTICSEARCH_USE_SSL="true"
-RULES_DIR="elastalert_rules"
 
 # Banner
 echo "======================================================================"
@@ -23,14 +22,10 @@ if ! command -v docker &> /dev/null; then
     exit 1
 fi
 
-# Check if the ElastAlert rules directory exists
-if [ ! -d "$RULES_DIR" ]; then
-    echo "Creating ElastAlert rules directory..."
-    mkdir -p "$RULES_DIR"
-fi
-
 # Create required directories
-echo "Creating ElastAlert configuration directories..."
+echo "Creating ElastAlert directory structure..."
+mkdir -p elastalert/rules
+mkdir -p elastalert/modules
 mkdir -p elastalert/config
 
 # Create ElastAlert config file
@@ -70,7 +65,7 @@ if [ "$ELASTICSEARCH_USE_SSL" = "true" ]; then
     cat >> elastalert/config/config.yaml << EOL
 use_ssl: true
 verify_certs: true
-ca_certs: /opt/cacert.pem
+ca_certs: /opt/elasticsearch.crt
 EOL
 fi
 
@@ -103,8 +98,9 @@ fi
 echo "Starting ElastAlert container..."
 DOCKER_CMD="docker run --net="host" -d --name elastalert --restart=always \
 -v $(pwd)/elastalert/config/config.yaml:/opt/elastalert/config.yaml \
--v $(pwd)/$RULES_DIR:/opt/elastalert/rules \
--v $(pwd)/cacert.pem:/opt/cacert.pem \
+-v $(pwd)/elastalert/rules:/opt/elastalert/rules \
+-v $(pwd)/elastalert/modules:/opt/elastalert/modules \
+-v $(pwd)/cert/elasticsearch.crt:/opt/elasticsearch.crt \
 jertel/elastalert2 --verbose"
 
 echo "Running command: $DOCKER_CMD"
@@ -113,6 +109,7 @@ eval $DOCKER_CMD
 echo
 echo "ElastAlert 2 has been set up and started in Docker."
 echo "Configuration: $(pwd)/elastalert/config/config.yaml"
-echo "Rules directory: $(pwd)/$RULES_DIR/"
+echo "Rules directory: $(pwd)/elastalert/rules/"
+echo "Modules directory: $(pwd)/elastalert/modules/"
 echo 
 echo "Setup complete!" 

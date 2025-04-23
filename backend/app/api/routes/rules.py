@@ -7,10 +7,10 @@ from app.config.config import config
 # Set up logger
 logger = logging.getLogger(__name__)
 
-# Create rules routes blueprint
-rules_bp = Blueprint('rules', __name__, url_prefix='/api')
+# Create rules routes blueprint - Fix the prefix to match others
+rules_bp = Blueprint('rules', __name__)
 
-@rules_bp.route('/rules', methods=['GET'])
+@rules_bp.route('', methods=['GET'])
 def get_rules():
     """Get all ElastAlert rules."""
     elastalert_client = current_app.config['elastalert_client']
@@ -25,7 +25,7 @@ def get_rules():
         'rules_dir': elastalert_client.rules_dir
     })
 
-@rules_bp.route('/rules/<filename>', methods=['GET'])
+@rules_bp.route('/<filename>', methods=['GET'])
 def get_rule(filename):
     """Get a specific ElastAlert rule."""
     elastalert_client = current_app.config['elastalert_client']
@@ -46,7 +46,7 @@ def get_rule(filename):
             'filename': filename
         }), 404
 
-@rules_bp.route('/rules/<filename>/yaml', methods=['GET'])
+@rules_bp.route('/<filename>/yaml', methods=['GET'])
 def get_rule_yaml(filename):
     """Get a specific ElastAlert rule as raw YAML."""
     elastalert_client = current_app.config['elastalert_client']
@@ -70,7 +70,7 @@ def get_rule_yaml(filename):
         logger.error(f"Error reading rule file {rule_path}: {e}")
         return jsonify({"error": f"Error reading rule file: {str(e)}"}), 500
 
-@rules_bp.route('/rules', methods=['POST'])
+@rules_bp.route('', methods=['POST'])
 def create_rule():
     """Create a new ElastAlert rule."""
     rule_data = request.json
@@ -86,7 +86,7 @@ def create_rule():
     else:
         return jsonify({'error': f'Failed to create rule: {result}'}), 400
 
-@rules_bp.route('/rules/yaml', methods=['POST'])
+@rules_bp.route('/yaml', methods=['POST'])
 def create_rule_from_yaml():
     """Create a new ElastAlert rule from raw YAML content."""
     data = request.json
@@ -131,7 +131,7 @@ def create_rule_from_yaml():
         logger.error(f"Error creating rule from YAML: {e}")
         return jsonify({'error': f'Error creating rule: {str(e)}'}), 500
 
-@rules_bp.route('/rules/<filename>', methods=['PUT'])
+@rules_bp.route('/<filename>', methods=['PUT'])
 def update_rule(filename):
     """Update an existing ElastAlert rule."""
     rule_data = request.json
@@ -150,7 +150,7 @@ def update_rule(filename):
     else:
         return jsonify({'error': f'Failed to update rule: {result}'}), 400
 
-@rules_bp.route('/rules/<filename>/yaml', methods=['PUT'])
+@rules_bp.route('/<filename>/yaml', methods=['PUT'])
 def update_rule_yaml(filename):
     """Update an existing ElastAlert rule with raw YAML content."""
     data = request.json
@@ -200,7 +200,7 @@ def update_rule_yaml(filename):
             'error': f'Error writing rule file: {str(e)}'
         }), 500
 
-@rules_bp.route('/rules/<filename>', methods=['DELETE'])
+@rules_bp.route('/<filename>', methods=['DELETE'])
 def delete_rule(filename):
     """Delete an ElastAlert rule."""
     elastalert_client = current_app.config['elastalert_client']
@@ -220,4 +220,4 @@ def restart_elastalert():
     if success:
         return jsonify({'message': 'ElastAlert restarted successfully'})
     else:
-        return jsonify({'error': 'Failed to restart ElastAlert'}), 500 
+        return jsonify({'error': 'Failed to restart ElastAlert'}), 500

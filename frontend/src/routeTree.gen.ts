@@ -21,6 +21,7 @@ import { Route as auth500Import } from './routes/(auth)/500'
 import { Route as AuthenticatedRulesRouteImport } from './routes/_authenticated/rules/route'
 import { Route as AuthenticatedAlertsRouteImport } from './routes/_authenticated/alerts/route'
 import { Route as AuthenticatedRulesIndexImport } from './routes/_authenticated/rules/index'
+import { Route as AuthenticatedCommandsIndexImport } from './routes/_authenticated/commands/index'
 import { Route as AuthenticatedAlertsIndexImport } from './routes/_authenticated/alerts/index'
 import { Route as AuthenticatedAgentsIndexImport } from './routes/_authenticated/agents/index'
 import { Route as AuthenticatedAgentsRegisterIndexImport } from './routes/_authenticated/agents/register/index'
@@ -252,6 +253,14 @@ const AuthenticatedRulesIndexRoute = AuthenticatedRulesIndexImport.update({
   getParentRoute: () => AuthenticatedRulesRouteRoute,
 } as any)
 
+const AuthenticatedCommandsIndexRoute = AuthenticatedCommandsIndexImport.update(
+  {
+    id: '/commands/',
+    path: '/commands/',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any,
+)
+
 const AuthenticatedAlertsIndexRoute = AuthenticatedAlertsIndexImport.update({
   id: '/',
   path: '/',
@@ -473,6 +482,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedAlertsIndexImport
       parentRoute: typeof AuthenticatedAlertsRouteImport
     }
+    '/_authenticated/commands/': {
+      id: '/_authenticated/commands/'
+      path: '/commands'
+      fullPath: '/commands'
+      preLoaderRoute: typeof AuthenticatedCommandsIndexImport
+      parentRoute: typeof AuthenticatedRouteImport
+    }
     '/_authenticated/rules/': {
       id: '/_authenticated/rules/'
       path: '/'
@@ -594,6 +610,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedSettingsRouteLazyRoute: typeof AuthenticatedSettingsRouteLazyRouteWithChildren
   AuthenticatedIndexRoute: typeof AuthenticatedIndexRoute
   AuthenticatedAgentsIndexRoute: typeof AuthenticatedAgentsIndexRoute
+  AuthenticatedCommandsIndexRoute: typeof AuthenticatedCommandsIndexRoute
   AuthenticatedAppsIndexLazyRoute: typeof AuthenticatedAppsIndexLazyRoute
   AuthenticatedChatsIndexLazyRoute: typeof AuthenticatedChatsIndexLazyRoute
   AuthenticatedHelpCenterIndexLazyRoute: typeof AuthenticatedHelpCenterIndexLazyRoute
@@ -609,6 +626,7 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
     AuthenticatedSettingsRouteLazyRouteWithChildren,
   AuthenticatedIndexRoute: AuthenticatedIndexRoute,
   AuthenticatedAgentsIndexRoute: AuthenticatedAgentsIndexRoute,
+  AuthenticatedCommandsIndexRoute: AuthenticatedCommandsIndexRoute,
   AuthenticatedAppsIndexLazyRoute: AuthenticatedAppsIndexLazyRoute,
   AuthenticatedChatsIndexLazyRoute: AuthenticatedChatsIndexLazyRoute,
   AuthenticatedHelpCenterIndexLazyRoute: AuthenticatedHelpCenterIndexLazyRoute,
@@ -642,6 +660,7 @@ export interface FileRoutesByFullPath {
   '/settings/notifications': typeof AuthenticatedSettingsNotificationsLazyRoute
   '/agents': typeof AuthenticatedAgentsIndexRoute
   '/alerts/': typeof AuthenticatedAlertsIndexRoute
+  '/commands': typeof AuthenticatedCommandsIndexRoute
   '/rules/': typeof AuthenticatedRulesIndexRoute
   '/apps': typeof AuthenticatedAppsIndexLazyRoute
   '/chats': typeof AuthenticatedChatsIndexLazyRoute
@@ -670,6 +689,7 @@ export interface FileRoutesByTo {
   '/settings/notifications': typeof AuthenticatedSettingsNotificationsLazyRoute
   '/agents': typeof AuthenticatedAgentsIndexRoute
   '/alerts': typeof AuthenticatedAlertsIndexRoute
+  '/commands': typeof AuthenticatedCommandsIndexRoute
   '/rules': typeof AuthenticatedRulesIndexRoute
   '/apps': typeof AuthenticatedAppsIndexLazyRoute
   '/chats': typeof AuthenticatedChatsIndexLazyRoute
@@ -704,6 +724,7 @@ export interface FileRoutesById {
   '/_authenticated/settings/notifications': typeof AuthenticatedSettingsNotificationsLazyRoute
   '/_authenticated/agents/': typeof AuthenticatedAgentsIndexRoute
   '/_authenticated/alerts/': typeof AuthenticatedAlertsIndexRoute
+  '/_authenticated/commands/': typeof AuthenticatedCommandsIndexRoute
   '/_authenticated/rules/': typeof AuthenticatedRulesIndexRoute
   '/_authenticated/apps/': typeof AuthenticatedAppsIndexLazyRoute
   '/_authenticated/chats/': typeof AuthenticatedChatsIndexLazyRoute
@@ -738,6 +759,7 @@ export interface FileRouteTypes {
     | '/settings/notifications'
     | '/agents'
     | '/alerts/'
+    | '/commands'
     | '/rules/'
     | '/apps'
     | '/chats'
@@ -765,6 +787,7 @@ export interface FileRouteTypes {
     | '/settings/notifications'
     | '/agents'
     | '/alerts'
+    | '/commands'
     | '/rules'
     | '/apps'
     | '/chats'
@@ -797,6 +820,7 @@ export interface FileRouteTypes {
     | '/_authenticated/settings/notifications'
     | '/_authenticated/agents/'
     | '/_authenticated/alerts/'
+    | '/_authenticated/commands/'
     | '/_authenticated/rules/'
     | '/_authenticated/apps/'
     | '/_authenticated/chats/'
@@ -870,6 +894,7 @@ export const routeTree = rootRoute
         "/_authenticated/settings",
         "/_authenticated/",
         "/_authenticated/agents/",
+        "/_authenticated/commands/",
         "/_authenticated/apps/",
         "/_authenticated/chats/",
         "/_authenticated/help-center/",
@@ -963,6 +988,10 @@ export const routeTree = rootRoute
     "/_authenticated/alerts/": {
       "filePath": "_authenticated/alerts/index.tsx",
       "parent": "/_authenticated/alerts"
+    },
+    "/_authenticated/commands/": {
+      "filePath": "_authenticated/commands/index.tsx",
+      "parent": "/_authenticated"
     },
     "/_authenticated/rules/": {
       "filePath": "_authenticated/rules/index.tsx",

@@ -15,7 +15,7 @@ Before using the ElastAlert integration, you need:
 The simplest setup method is to use the provided `setup_elastalert.sh` script, which configures and starts ElastAlert in Docker:
 
 ```bash
-./setup_elastalert.sh
+./setup_elastalert.sh # Run this inside the backend folder
 ```
 
 ## Alert Flow

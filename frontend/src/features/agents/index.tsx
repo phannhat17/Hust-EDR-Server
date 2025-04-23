@@ -26,6 +26,14 @@ import { Search } from '@/components/search'
 import { ThemeSwitch } from '@/components/theme-switch'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 import { useState } from 'react'
+import { DotsHorizontalIcon } from '@radix-ui/react-icons'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+import { isAgentOnline } from '@/types/agent'
 
 export default function Agents() {
   const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null)
@@ -99,85 +107,140 @@ export default function Agents() {
                       </TableCell>
                       <TableCell>{new Date(agent.last_seen).toLocaleString()}</TableCell>
                       <TableCell>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              className="h-8 w-8 p-0"
+                            >
+                              <DotsHorizontalIcon className="h-4 w-4" />
+                              <span className="sr-only">Show options</span>
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem
+                              onClick={() => {
+                                setSelectedAgent(agent);
+                                // Open the dialog programmatically by finding and clicking the button
+                                const detailsButton = document.querySelector(`#details-dialog-${agent.id}`);
+                                if (detailsButton instanceof HTMLButtonElement) {
+                                  detailsButton.click();
+                                }
+                              }}
+                            >
+                              Details
+                            </DropdownMenuItem>
+                            <DropdownMenuItem asChild>
+                              <Link to="/commands" search={{ agent_id: agent.id }}>
+                                Command
+                              </Link>
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                        
+                        {/* Hidden dialog trigger that the dropdown can activate */}
                         <Dialog>
                           <DialogTrigger asChild>
                             <Button 
+                              id={`details-dialog-${agent.id}`}
                               variant="outline" 
                               size="sm"
                               onClick={() => setSelectedAgent(agent)}
+                              className="hidden"
                             >
                               Details
                             </Button>
                           </DialogTrigger>
-                          <DialogContent className="sm:max-w-md">
+                          <DialogContent className="sm:max-w-[600px]">
                             <DialogHeader>
-                              <DialogTitle>Agent Details</DialogTitle>
+                              <DialogTitle className="flex items-center gap-2 text-xl">
+                                Agent Details
+                                {selectedAgent && (
+                                  <Badge variant={isAgentOnline(selectedAgent.last_seen) ? "green" : "destructive"} className="ml-2">
+                                    {isAgentOnline(selectedAgent.last_seen) ? "Online" : "Offline"}
+                                  </Badge>
+                                )}
+                              </DialogTitle>
                             </DialogHeader>
                             {selectedAgent && (
-                              <div className="grid gap-4">
-                                <div className="grid grid-cols-2 gap-4">
-                                  <div className="space-y-1">
-                                    <h4 className="font-medium text-sm">Hostname</h4>
-                                    <p className="text-sm">{selectedAgent.hostname}</p>
-                                  </div>
-                                  <div className="space-y-1">
-                                    <h4 className="font-medium text-sm">IP Address</h4>
-                                    <p className="text-sm">{selectedAgent.ip_address}</p>
-                                  </div>
-                                </div>
-                                <div className="space-y-1">
-                                  <h4 className="font-medium text-sm">Operating System</h4>
-                                  <p className="text-sm">{selectedAgent.os_version_full}</p>
-                                </div>
-                                <div className="grid grid-cols-2 gap-4">
-                                  <div className="space-y-1">
-                                    <h4 className="font-medium text-sm">MAC Address</h4>
-                                    <p className="text-sm">{selectedAgent.mac_address || 'Not available'}</p>
-                                  </div>
-                                  <div className="space-y-1">
-                                    <h4 className="font-medium text-sm">Username</h4>
-                                    <p className="text-sm">{selectedAgent.username || 'Not available'}</p>
+                              <div className="mt-4 space-y-6">
+                                {/* Basic Information */}
+                                <div className="rounded-lg border p-4">
+                                  <h3 className="mb-3 text-sm font-medium text-muted-foreground">Basic Information</h3>
+                                  <div className="grid grid-cols-2 gap-4">
+                                    <div>
+                                      <h4 className="text-sm font-semibold">Hostname</h4>
+                                      <p className="text-sm">{selectedAgent.hostname}</p>
+                                    </div>
+                                    <div>
+                                      <h4 className="text-sm font-semibold">IP Address</h4>
+                                      <p className="text-sm">{selectedAgent.ip_address}</p>
+                                    </div>
+                                    <div>
+                                      <h4 className="text-sm font-semibold">MAC Address</h4>
+                                      <p className="text-sm">{selectedAgent.mac_address || 'Not available'}</p>
+                                    </div>
+                                    <div>
+                                      <h4 className="text-sm font-semibold">Username</h4>
+                                      <p className="text-sm">{selectedAgent.username || 'Not available'}</p>
+                                    </div>
                                   </div>
                                 </div>
-                                <div className="grid grid-cols-3 gap-4">
-                                  <div className="space-y-1">
-                                    <h4 className="font-medium text-sm">CPU Usage</h4>
-                                    <p className="text-sm">{selectedAgent.cpu_usage !== undefined ? `${selectedAgent.cpu_usage.toFixed(1)}%` : 'N/A'}</p>
+
+                                {/* System Information */}
+                                <div className="rounded-lg border p-4">
+                                  <h3 className="mb-3 text-sm font-medium text-muted-foreground">System Information</h3>
+                                  <div className="mb-4">
+                                    <h4 className="text-sm font-semibold">Operating System</h4>
+                                    <p className="text-sm">{selectedAgent.os_version_full}</p>
                                   </div>
-                                  <div className="space-y-1">
-                                    <h4 className="font-medium text-sm">Memory Usage</h4>
-                                    <p className="text-sm">{selectedAgent.memory_usage !== undefined ? `${selectedAgent.memory_usage.toFixed(1)}%` : 'N/A'}</p>
-                                  </div>
-                                  <div className="space-y-1">
-                                    <h4 className="font-medium text-sm">Uptime</h4>
-                                    <p className="text-sm">
-                                      {selectedAgent.uptime !== undefined 
-                                        ? formatUptime(selectedAgent.uptime) 
-                                        : 'N/A'}
-                                    </p>
-                                  </div>
-                                </div>
-                                <div className="grid grid-cols-3 gap-4">
-                                  <div className="space-y-1">
-                                    <h4 className="font-medium text-sm">Status</h4>
-                                    <p className="text-sm">
-                                      <Badge variant={selectedAgent.status === 'ONLINE' ? "green" : "black"}>
-                                        {selectedAgent.status}
-                                      </Badge>
-                                    </p>
-                                  </div>
-                                  <div className="space-y-1">
-                                    <h4 className="font-medium text-sm">Agent Version</h4>
-                                    <p className="text-sm">{selectedAgent.version}</p>
-                                  </div>
-                                  <div className="space-y-1">
-                                    <h4 className="font-medium text-sm">Registered</h4>
-                                    <p className="text-sm">{new Date(selectedAgent.registered_at).toLocaleString()}</p>
+                                  
+                                  <div className="grid grid-cols-3 gap-4">
+                                    <div className="rounded-md bg-muted p-3">
+                                      <h4 className="text-xs font-semibold text-muted-foreground">CPU Usage</h4>
+                                      <p className="text-lg font-medium">{selectedAgent.cpu_usage !== undefined ? `${selectedAgent.cpu_usage.toFixed(1)}%` : 'N/A'}</p>
+                                    </div>
+                                    <div className="rounded-md bg-muted p-3">
+                                      <h4 className="text-xs font-semibold text-muted-foreground">Memory Usage</h4>
+                                      <p className="text-lg font-medium">{selectedAgent.memory_usage !== undefined ? `${selectedAgent.memory_usage.toFixed(1)}%` : 'N/A'}</p>
+                                    </div>
+                                    <div className="rounded-md bg-muted p-3">
+                                      <h4 className="text-xs font-semibold text-muted-foreground">Uptime</h4>
+                                      <p className="text-lg font-medium">
+                                        {selectedAgent.uptime !== undefined 
+                                          ? formatUptime(selectedAgent.uptime) 
+                                          : 'N/A'}
+                                      </p>
+                                    </div>
                                   </div>
                                 </div>
-                                <div className="space-y-1">
-                                  <h4 className="font-medium text-sm">Last Seen</h4>
-                                  <p className="text-sm">{new Date(selectedAgent.last_seen).toLocaleString()}</p>
+
+                                {/* Agent Status */}
+                                <div className="rounded-lg border p-4">
+                                  <h3 className="mb-3 text-sm font-medium text-muted-foreground">Agent Status</h3>
+                                  <div className="grid grid-cols-3 gap-4">
+                                    <div>
+                                      <h4 className="text-sm font-semibold">Agent Version</h4>
+                                      <p className="text-sm">{selectedAgent.version}</p>
+                                    </div>
+                                    <div>
+                                      <h4 className="text-sm font-semibold">Registered</h4>
+                                      <p className="text-sm">{new Date(selectedAgent.registered_at).toLocaleString()}</p>
+                                    </div>
+                                    <div>
+                                      <h4 className="text-sm font-semibold">Last Seen</h4>
+                                      <p className="text-sm">{new Date(selectedAgent.last_seen).toLocaleString()}</p>
+                                    </div>
+                                  </div>
+                                </div>
+                                
+                                {/* Quick Actions */}
+                                <div className="flex justify-end gap-2">
+                                  <Button variant="outline" size="sm" asChild>
+                                    <Link to="/commands" search={{ agent_id: selectedAgent.id }}>
+                                      Send Command
+                                    </Link>
+                                  </Button>
                                 </div>
                               </div>
                             )}
