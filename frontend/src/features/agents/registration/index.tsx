@@ -44,12 +44,59 @@ export default function AgentRegistration() {
   }
 
   function copyToClipboard(text: string, message: string) {
-    navigator.clipboard.writeText(text).then(() => {
-      toast({
-        title: 'Copied!',
-        description: message,
-      });
-    });
+    if (!navigator.clipboard) {
+      // Fallback for browsers that don't support clipboard API
+      const textArea = document.createElement('textarea');
+      textArea.value = text;
+      textArea.style.position = 'fixed';
+      textArea.style.left = '-999999px';
+      textArea.style.top = '-999999px';
+      document.body.appendChild(textArea);
+      textArea.focus();
+      textArea.select();
+      
+      try {
+        const successful = document.execCommand('copy');
+        if (successful) {
+          toast({
+            title: 'Copied!',
+            description: message,
+          });
+        } else {
+          toast({
+            title: 'Error',
+            description: 'Failed to copy text to clipboard',
+            variant: 'destructive'
+          });
+        }
+      } catch (err) {
+        toast({
+          title: 'Error',
+          description: 'Failed to copy text to clipboard',
+          variant: 'destructive'
+        });
+        console.error('Failed to copy text:', err);
+      }
+      
+      document.body.removeChild(textArea);
+    } else {
+      // Modern browsers with clipboard API
+      navigator.clipboard.writeText(text)
+        .then(() => {
+          toast({
+            title: 'Copied!',
+            description: message,
+          });
+        })
+        .catch(err => {
+          toast({
+            title: 'Error',
+            description: 'Failed to copy text to clipboard',
+            variant: 'destructive'
+          });
+          console.error('Failed to copy text:', err);
+        });
+    }
   }
 
   return (
@@ -111,8 +158,10 @@ export default function AgentRegistration() {
                           <Button 
                             variant="ghost" 
                             size="icon" 
-                            className="absolute top-2 right-2" 
+                            className="absolute top-2 right-2 hover:bg-muted-foreground/20" 
                             onClick={() => copyToClipboard(installCommand, "Installation command copied to clipboard")}
+                            title="Copy installation command"
+                            aria-label="Copy installation command"
                           >
                             <Copy className="h-4 w-4" />
                           </Button>
