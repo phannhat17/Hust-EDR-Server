@@ -21,15 +21,23 @@ log_dir.mkdir(parents=True, exist_ok=True)
 root_logger = logging.getLogger()
 root_logger.setLevel(getattr(logging, config.LOG_LEVEL))
 
+# Silence Flask/Werkzeug HTTP request logs
+logging.getLogger('werkzeug').setLevel(logging.ERROR)
+logging.getLogger('flask').setLevel(logging.ERROR)
+
 # Define log formatters
 standard_formatter = logging.Formatter(config.LOG_FORMAT)
 detailed_formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(threadName)s - %(filename)s:%(lineno)d - %(message)s')
 
-# Create console handler
+# Create console handler - only for GRPC logs
 console_handler = logging.StreamHandler()
 console_handler.setFormatter(standard_formatter)
 console_handler.setLevel(logging.INFO)
-root_logger.addHandler(console_handler)
+
+# Only add console handler to grpc logger, not root logger
+grpc_logger = logging.getLogger('app.grpc')
+grpc_logger.addHandler(console_handler)
+grpc_logger.propagate = False  # Prevent duplicate logs in parent loggers
 
 # Create file handlers for different components
 def create_component_handler(component_name, level=logging.INFO):
@@ -45,7 +53,7 @@ def create_component_handler(component_name, level=logging.INFO):
 components = {
     'app': logging.getLogger('app'),
     'api': logging.getLogger('app.api'),
-    'grpc': logging.getLogger('app.grpc'),
+    'grpc': grpc_logger,
     'elastalert': logging.getLogger('app.elastalert'),
     'auto_response': logging.getLogger('app.elastalert_auto_response'),
     'db': logging.getLogger('app.db'),
