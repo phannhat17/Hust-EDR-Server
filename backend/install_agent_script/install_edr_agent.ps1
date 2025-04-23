@@ -3,7 +3,7 @@
 # Must be run with administrator privileges
 
 param(
-    [string]$gRPCHost = "192.168.133.145:50051"
+    [string]$gRPCHost = "localhost:50051"
 )
 
 # Set download URL and installation paths

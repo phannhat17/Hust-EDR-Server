@@ -8,7 +8,8 @@
 function Install-EDRStack {
     param(
         [string]$ServerHost = "192.168.133.145:5000",
-        [string]$gRPCHost = "192.168.133.145:50051"
+        [string]$gRPCHost = "192.168.133.145",
+        [string]$gRPCPort = "50051"
     )
 
     Write-Host "Starting EDR Stack Installation..." -ForegroundColor Cyan
@@ -56,7 +57,7 @@ function Install-EDRStack {
 
     # Download the EDR agent script
     $edrScriptPath = "$tempDir\install_edr_agent.ps1"
-    $edrScriptUrl = "http://$ServerHost/api/install/edr-agent-script-with-host/$gRPCHost"
+    $edrScriptUrl = "http://$ServerHost/api/install/edr-agent-script?host$gRPCHost&port=$gRPCHost"
 
     try {
         Download-Script -Url $edrScriptUrl -OutputFile $edrScriptPath
@@ -128,7 +129,7 @@ function Install-EDRStack {
         
         # Create a modified Winlogbeat script that uses our config
         $winlogbeatScriptPath = "$tempDir\install_winlogbeat.ps1"
-        $winlogbeatScriptUrl = "http://$ServerHost/api/install/winlogbeat-script-with-host/$ServerHost"
+        $winlogbeatScriptUrl = "http://$ServerHost/api/install/winlogbeat-script?host=$ServerHost"
         
         Download-Script -Url $winlogbeatScriptUrl -OutputFile $winlogbeatScriptPath
         

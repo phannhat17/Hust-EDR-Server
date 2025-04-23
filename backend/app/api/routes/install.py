@@ -37,16 +37,20 @@ def get_winlogbeat_config():
     config_path = os.path.join(SCRIPT_DIR, 'winlogbeat.yml')
     return send_file(config_path, mimetype='text/plain')
 
-@install_bp.route('/winlogbeat-script-with-host/<host>', methods=['GET'])
-def get_winlogbeat_script_with_host(host):
+@install_bp.route('/winlogbeat-script', methods=['GET'])
+def get_winlogbeat_script_with_host():
     """Serve the Winlogbeat installation script with the server host parameter embedded."""
+    host = request.args.get('host', 'localhost')
+
     script_path = os.path.join(SCRIPT_DIR, 'install_winlogbeat.ps1')
     with open(script_path, 'r') as f:
         script_content = f.read()
     
     # Modify the script to include the server host parameter
-    modified_script = script_content.replace('param(\n    [string]$ServerHost = "localhost:5000"\n)', f'# Server host is embedded: {host}')
-    modified_script = modified_script.replace('$ServerHost', f'{host}')
+    modified_script = script_content.replace(
+        'param(\n    [string]$ServerHost = "localhost:5000"',
+        f'param(\n    [string]$ServerHost = "{host}"'
+    )
     
     # Return as plain text
     response = make_response(modified_script)
@@ -55,21 +59,23 @@ def get_winlogbeat_script_with_host(host):
 
 # EDR agent routes
 @install_bp.route('/edr-agent-script', methods=['GET'])
-def get_edr_agent_script():
-    """Serve the EDR agent installation script."""
-    script_path = os.path.join(SCRIPT_DIR, 'install_edr_agent.ps1')
-    return send_file(script_path, mimetype='text/plain')
-
-@install_bp.route('/edr-agent-script-with-host/<host>', methods=['GET'])
-def get_edr_agent_script_with_host(host):
-    """Serve the EDR agent installation script with the gRPC host parameter embedded."""
+def get_edr_agent_script_with_params():
+    """Serve the EDR agent installation script with the gRPC host and port parameters embedded."""
+    # Get host and port from query parameters
+    host = request.args.get('host', 'localhost')
+    port = request.args.get('port', '50051')
+    grpc_host = f"{host}:{port}"
+    
     script_path = os.path.join(SCRIPT_DIR, 'install_edr_agent.ps1')
     with open(script_path, 'r') as f:
         script_content = f.read()
     
     # Modify the script to include the gRPC host parameter
-    modified_script = script_content.replace('param(\n    [string]$gRPCHost = "192.168.133.145:50051"\n)', f'# gRPC host is embedded: {host}')
-    modified_script = modified_script.replace('$gRPCHost', f'{host}')
+    # Find and replace only the default value while preserving the variable name
+    modified_script = script_content.replace(
+        'param(\n    [string]$gRPCHost = "localhost:50051"',
+        f'param(\n    [string]$gRPCHost = "{grpc_host}"'
+    )
     
     # Return as plain text
     response = make_response(modified_script)
