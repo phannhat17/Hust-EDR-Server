@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import { Button } from '@/components/ui/button'
 import { Link } from '@tanstack/react-router'
@@ -14,31 +14,33 @@ import { Main } from '@/components/layout/main'
 import { TopNav } from '@/components/layout/top-nav'
 import { Search } from '@/components/search'
 import { ThemeSwitch } from '@/components/theme-switch'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Copy, ChevronsRight, ArrowLeft, Terminal, Server, Check } from 'lucide-react'
+import { Copy, ChevronsRight, ArrowLeft, Server, Check } from 'lucide-react'
 import { toast } from '@/hooks/use-toast'
+import axios from 'axios'
 
 export default function AgentRegistration() {
   const navigate = useNavigate();
-  const [agentName, setAgentName] = useState('');
-  const [agentToken, setAgentToken] = useState(generateToken());
-  const [activeTab, setActiveTab] = useState('generate');
+  const [activeTab, setActiveTab] = useState('install');
+  const [installCommand, setInstallCommand] = useState('');
   const apiHost = import.meta.env.VITE_API_URL || 'http://localhost:5000';
-
-  function generateToken() {
-    return Array.from({ length: 32 }, () => 
-      Math.floor(Math.random() * 16).toString(16)
-    ).join('');
-  }
-
-  function regenerateToken() {
-    setAgentToken(generateToken());
-    toast({
-      title: 'New token generated',
-      description: 'A new agent registration token has been generated.',
-    });
+  
+  useEffect(() => {
+    fetchInstallCommand();
+  }, []);
+  
+  async function fetchInstallCommand() {
+    try {
+      const response = await axios.get(`${apiHost}/api/install`);
+      setInstallCommand(response.data);
+    } catch (error) {
+      toast({
+        title: 'Error',
+        description: 'Failed to fetch installation command.',
+        variant: 'destructive'
+      });
+      console.error('Failed to fetch install command:', error);
+    }
   }
 
   function copyToClipboard(text: string, message: string) {
@@ -49,8 +51,6 @@ export default function AgentRegistration() {
       });
     });
   }
-
-  const windowsCommand = `powershell -Command "& {Invoke-WebRequest -Uri '${apiHost}/api/agents/installer?token=${agentToken}&name=${agentName || 'edr-agent'}&platform=windows' -OutFile $env:TEMP\\edr-installer.ps1; Start-Process powershell -Verb RunAs -ArgumentList '-ExecutionPolicy Bypass -File $env:TEMP\\edr-installer.ps1'}"`;
 
   return (
     <>
@@ -80,91 +80,39 @@ export default function AgentRegistration() {
             <CardDescription>Follow these steps to register and install a new EDR agent</CardDescription>
           </CardHeader>
           <CardContent>
-            <Tabs defaultValue="generate" value={activeTab} onValueChange={setActiveTab} className="w-full">
-              <TabsList className="grid w-full grid-cols-3">
-                <TabsTrigger value="generate">1. Generate Token</TabsTrigger>
-                <TabsTrigger value="install">2. Install Agent</TabsTrigger>
-                <TabsTrigger value="verify" disabled={!agentToken}>3. Verify Connection</TabsTrigger>
+            <Tabs defaultValue="install" value={activeTab} onValueChange={setActiveTab} className="w-full">
+              <TabsList className="grid w-full grid-cols-2">
+                <TabsTrigger value="install">1. Install Agent</TabsTrigger>
+                <TabsTrigger value="verify">2. Verify Connection</TabsTrigger>
               </TabsList>
-              
-              <TabsContent value="generate" className="space-y-4 py-4">
-                <div className="space-y-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="agent-name">Agent Name (Optional)</Label>
-                    <Input 
-                      id="agent-name" 
-                      placeholder="e.g. web-server-01" 
-                      value={agentName}
-                      onChange={(e) => setAgentName(e.target.value)}
-                    />
-                  </div>
-                  
-                  <div className="space-y-2">
-                    <Label htmlFor="agent-token">Registration Token</Label>
-                    <div className="flex space-x-2">
-                      <Input 
-                        id="agent-token" 
-                        value={agentToken} 
-                        readOnly
-                      />
-                      <Button onClick={regenerateToken} variant="outline" size="icon">
-                        <svg
-                          xmlns="http://www.w3.org/2000/svg"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          className="h-4 w-4"
-                        >
-                          <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
-                          <path d="M3 3v5h5" />
-                        </svg>
-                        <span className="sr-only">Regenerate</span>
-                      </Button>
-                    </div>
-                    <p className="text-sm text-muted-foreground">
-                      This token will be used to authenticate the agent during installation.
-                    </p>
-                  </div>
-                </div>
-                
-                <div className="flex justify-end">
-                  <Button onClick={() => setActiveTab('install')}>
-                    Next Step <ChevronsRight className="ml-2 h-4 w-4" />
-                  </Button>
-                </div>
-              </TabsContent>
               
               <TabsContent value="install" className="space-y-4 py-4">
                 <div className="space-y-4">
                   <div>
-                    <h3 className="text-lg font-medium">Choose your platform</h3>
+                    <h3 className="text-lg font-medium">Installation Command</h3>
                     <p className="text-sm text-muted-foreground">
-                      Run the appropriate command on the system where you want to install the agent.
+                      Run the following command on the system where you want to install the agent.
                     </p>
                   </div>
                   
                   <div className="space-y-4">
-                    
                     <Card>
                       <CardHeader>
                         <div className="flex items-center">
                           <Server className="mr-2 h-5 w-5" />
-                          <CardTitle>Windows</CardTitle>
+                          <CardTitle>Installation Command</CardTitle>
                         </div>
                       </CardHeader>
                       <CardContent>
                         <div className="relative">
                           <pre className="bg-muted rounded-md p-4 overflow-x-auto text-sm">
-                            {windowsCommand}
+                            {installCommand}
                           </pre>
                           <Button 
                             variant="ghost" 
                             size="icon" 
                             className="absolute top-2 right-2" 
-                            onClick={() => copyToClipboard(windowsCommand, "Windows installation command copied to clipboard")}
+                            onClick={() => copyToClipboard(installCommand, "Installation command copied to clipboard")}
                           >
                             <Copy className="h-4 w-4" />
                           </Button>
@@ -174,10 +122,7 @@ export default function AgentRegistration() {
                   </div>
                 </div>
                 
-                <div className="flex justify-between">
-                  <Button variant="outline" onClick={() => setActiveTab('generate')}>
-                    <ArrowLeft className="mr-2 h-4 w-4" /> Previous Step
-                  </Button>
+                <div className="flex justify-end">
                   <Button onClick={() => setActiveTab('verify')}>
                     Next Step <ChevronsRight className="ml-2 h-4 w-4" />
                   </Button>
