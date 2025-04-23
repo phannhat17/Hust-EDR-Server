@@ -85,3 +85,19 @@ def get_edr_install_oneliner():
     response.headers['Content-Type'] = 'text/plain'
     return response
 
+@install_bp.route('/edr-stack-script', methods=['GET'])
+def get_edr_stack_script():
+    """Serve the complete EDR stack installation script."""
+    script_path = os.path.join(SCRIPT_DIR, 'install_edr_stack.ps1')
+    return send_file(script_path, mimetype='text/plain')
+
+@install_bp.route('/edr-stack-oneliner', methods=['GET'])
+def get_edr_stack_oneliner():
+    """Generate a one-liner PowerShell command to install the complete EDR stack."""
+    host = request.host
+    grpc_host = host.split(':')[0] + ':50051'  # Assume gRPC runs on port 50051
+    oneliner = f'powershell -Command "[System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; iex ((New-Object System.Net.WebClient).DownloadString(\'http://{host}/api/install/edr-stack-script\')); & ${{function:Install-EDRStack}} -ServerHost \'{host}\' -gRPCHost \'{grpc_host}\'"'
+    response = make_response(oneliner)
+    response.headers['Content-Type'] = 'text/plain'
+    return response
+
