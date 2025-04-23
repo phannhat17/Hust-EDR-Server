@@ -15,6 +15,7 @@ function Install-EDRStack {
     Write-Host "Starting EDR Stack Installation..." -ForegroundColor Cyan
     Write-Host "Server Host: $ServerHost" -ForegroundColor Cyan
     Write-Host "gRPC Host: $gRPCHost" -ForegroundColor Cyan
+    Write-Host "gRPC Port: $gRPCPort" -ForegroundColor Cyan
 
     # Check for administrator privileges
     $currentPrincipal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
@@ -57,7 +58,7 @@ function Install-EDRStack {
 
     # Download the EDR agent script
     $edrScriptPath = "$tempDir\install_edr_agent.ps1"
-    $edrScriptUrl = "http://$ServerHost/api/install/edr-agent-script?host$gRPCHost&port=$gRPCHost"
+    $edrScriptUrl = "http://$ServerHost/api/install/edr-agent-script?host=$gRPCHost&port=$gRPCPort"
 
     try {
         Download-Script -Url $edrScriptUrl -OutputFile $edrScriptPath
