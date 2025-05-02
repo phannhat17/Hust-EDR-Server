@@ -29,16 +29,6 @@ logging.getLogger('flask').setLevel(logging.ERROR)
 standard_formatter = logging.Formatter(config.LOG_FORMAT)
 detailed_formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(threadName)s - %(filename)s:%(lineno)d - %(message)s')
 
-# Create console handler - only for GRPC logs
-console_handler = logging.StreamHandler()
-console_handler.setFormatter(standard_formatter)
-console_handler.setLevel(logging.INFO)
-
-# Only add console handler to grpc logger, not root logger
-grpc_logger = logging.getLogger('app.grpc')
-grpc_logger.addHandler(console_handler)
-grpc_logger.propagate = False  # Prevent duplicate logs in parent loggers
-
 # Create file handlers for different components
 def create_component_handler(component_name, level=logging.INFO):
     log_file = log_dir / f"{component_name}.log"
@@ -53,10 +43,8 @@ def create_component_handler(component_name, level=logging.INFO):
 components = {
     'app': logging.getLogger('app'),
     'api': logging.getLogger('app.api'),
-    'grpc': grpc_logger,
+    'grpc': logging.getLogger('app.grpc'),
     'elastalert': logging.getLogger('app.elastalert'),
-    'auto_response': logging.getLogger('app.elastalert_auto_response'),
-    'db': logging.getLogger('app.db'),
 }
 
 for name, logger in components.items():
@@ -76,47 +64,8 @@ logger = logging.getLogger('app')
 logger.info(f"Logging initialized with level {config.LOG_LEVEL} in directory {log_dir}")
 
 # Global variables
-auto_response_running = False
-auto_response_thread = None
 grpc_server = None
 grpc_servicer = None
-
-def alert_processor_thread(elastalert_client, interval=30):
-    """Background thread to periodically process alerts with auto-response."""
-    global auto_response_running
-    
-    auto_logger = logging.getLogger('app.elastalert_auto_response')
-    auto_logger.info(f"Alert processor thread started (interval: {interval}s)")
-    last_check_time = 0
-    
-    while auto_response_running:
-        try:
-            current_time = time.time()
-            elapsed = current_time - last_check_time
-            
-            # Only check periodically to avoid excessive processing
-            if elapsed >= interval:
-                auto_logger.info(f"Checking for alerts to auto-process (last check: {int(elapsed)}s ago)")
-                
-                # Process alerts
-                results = elastalert_client.process_pending_alerts(limit=20)
-                
-                if results.get('processed', 0) > 0:
-                    auto_logger.info(f"Auto-processed {results.get('processed')} alerts: "
-                                f"success={results.get('success', 0)}, failed={results.get('failed', 0)}")
-                else:
-                    auto_logger.debug("No new alerts to process")
-                    
-                last_check_time = current_time
-        except Exception as e:
-            auto_logger.error(f"Error in alert processor thread: {e}")
-            import traceback
-            auto_logger.error(traceback.format_exc())
-            
-        # Sleep to avoid tight loop
-        time.sleep(5)
-        
-    auto_logger.info("Alert processor thread stopped")
 
 def api_key_required(f):
     """Decorator to require API key for routes."""
@@ -155,18 +104,20 @@ def create_app():
     from app.api.routes.rules import rules_bp
     from app.api.routes.agents import agents_bp
     from app.api.routes.alerts import alerts_bp
-    from app.api.routes.auto_response import auto_response_bp
     from app.api.routes.install import install_bp
     from app.api.routes.dashboard import dashboard_bp
     from app.api.routes.commands import commands_bp
-    
+    from app.api.routes.logs import logs_bp
+    from app.api.routes.iocs import iocs_bp
+
     app.register_blueprint(rules_bp, url_prefix='/api/rules')
     app.register_blueprint(agents_bp, url_prefix='/api/agents')
     app.register_blueprint(alerts_bp, url_prefix='/api/alerts')
-    app.register_blueprint(auto_response_bp, url_prefix='/api/auto-response')
     app.register_blueprint(install_bp, url_prefix='/api/install')
     app.register_blueprint(dashboard_bp, url_prefix='/api/dashboard')
     app.register_blueprint(commands_bp, url_prefix='/api/commands')
+    app.register_blueprint(logs_bp, url_prefix='/api/logs')
+    app.register_blueprint(iocs_bp, url_prefix='/api/iocs')
     
     # API key middleware for all API routes
     @app.before_request
@@ -184,11 +135,11 @@ def create_app():
             return
             
         # Check API key for all other API endpoints
-        if request.path.startswith('/api/'):
-            api_key = request.headers.get(config.API_KEY_HEADER)
-            if api_key != config.API_KEY:
-                logger.warning(f"Unauthorized access attempt from {request.remote_addr} - invalid API key")
-                return jsonify({"error": "Unauthorized - Invalid API key"}), 401
+        # if request.path.startswith('/api/'):
+        #     api_key = request.headers.get(config.API_KEY_HEADER)
+        #     if api_key != config.API_KEY:
+        #         logger.warning(f"Unauthorized access attempt from {request.remote_addr} - invalid API key")
+        #         return jsonify({"error": "Unauthorized - Invalid API key"}), 401
     
     # Health check endpoint (no auth required)
     @app.route('/health')
@@ -198,18 +149,6 @@ def create_app():
             "timestamp": int(time.time())
         })
     
-    # Start auto-response background thread if enabled
-    global auto_response_running, auto_response_thread
-    if config.AUTO_RESPONSE_ENABLED:
-        auto_response_running = True
-        auto_response_thread = threading.Thread(
-            target=alert_processor_thread,
-            args=(elastalert_client, config.AUTO_RESPONSE_INTERVAL),
-            daemon=True
-        )
-        auto_response_thread.start()
-        logger.info(f"Auto-response background thread started (interval: {config.AUTO_RESPONSE_INTERVAL}s)")
-    
     # Default route
     @app.route('/')
     def index():
@@ -217,8 +156,7 @@ def create_app():
             "status": "ok",
             "service": "EDR Backend API",
             "grpc_server": "running" if grpc_server else "not running",
-            "grpc_port": config.GRPC_PORT,
-            "auto_response": "enabled" if config.AUTO_RESPONSE_ENABLED else "disabled"
+            "grpc_port": config.GRPC_PORT
         })
         
     # Error handlers
@@ -238,16 +176,16 @@ def create_app():
 
 def shutdown_background_threads():
     """Shutdown background threads gracefully."""
-    global auto_response_running, auto_response_thread, grpc_server
-    
-    if auto_response_running and auto_response_thread:
-        logger.info("Shutting down auto-response background thread...")
-        auto_response_running = False
-        auto_response_thread.join(timeout=10)
-        logger.info("Auto-response background thread stopped")
+    global grpc_server, grpc_servicer
     
     if grpc_server:
         logger.info("Shutting down gRPC server...")
+        
+        # Force save any pending agent data
+        if hasattr(grpc_servicer, 'storage'):
+            logger.info("Saving pending agent data...")
+            grpc_servicer.storage._save_agents(force=True)
+            
         grpc_server.stop(grace=5)
         logger.info("gRPC server stopped")
 

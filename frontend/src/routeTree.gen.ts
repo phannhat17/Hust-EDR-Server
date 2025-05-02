@@ -19,6 +19,8 @@ import { Route as authSignInImport } from './routes/(auth)/sign-in'
 import { Route as authOtpImport } from './routes/(auth)/otp'
 import { Route as auth500Import } from './routes/(auth)/500'
 import { Route as AuthenticatedRulesRouteImport } from './routes/_authenticated/rules/route'
+import { Route as AuthenticatedLogsRouteImport } from './routes/_authenticated/logs/route'
+import { Route as AuthenticatedIocsRouteImport } from './routes/_authenticated/iocs/route'
 import { Route as AuthenticatedAlertsRouteImport } from './routes/_authenticated/alerts/route'
 import { Route as AuthenticatedRulesIndexImport } from './routes/_authenticated/rules/index'
 import { Route as AuthenticatedCommandsIndexImport } from './routes/_authenticated/commands/index'
@@ -184,6 +186,18 @@ const AuthenticatedRulesRouteRoute = AuthenticatedRulesRouteImport.update({
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
 
+const AuthenticatedLogsRouteRoute = AuthenticatedLogsRouteImport.update({
+  id: '/logs',
+  path: '/logs',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
+
+const AuthenticatedIocsRouteRoute = AuthenticatedIocsRouteImport.update({
+  id: '/iocs',
+  path: '/iocs',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
+
 const AuthenticatedAlertsRouteRoute = AuthenticatedAlertsRouteImport.update({
   id: '/alerts',
   path: '/alerts',
@@ -340,6 +354,20 @@ declare module '@tanstack/react-router' {
       path: '/alerts'
       fullPath: '/alerts'
       preLoaderRoute: typeof AuthenticatedAlertsRouteImport
+      parentRoute: typeof AuthenticatedRouteImport
+    }
+    '/_authenticated/iocs': {
+      id: '/_authenticated/iocs'
+      path: '/iocs'
+      fullPath: '/iocs'
+      preLoaderRoute: typeof AuthenticatedIocsRouteImport
+      parentRoute: typeof AuthenticatedRouteImport
+    }
+    '/_authenticated/logs': {
+      id: '/_authenticated/logs'
+      path: '/logs'
+      fullPath: '/logs'
+      preLoaderRoute: typeof AuthenticatedLogsRouteImport
       parentRoute: typeof AuthenticatedRouteImport
     }
     '/_authenticated/rules': {
@@ -606,6 +634,8 @@ const AuthenticatedSettingsRouteLazyRouteWithChildren =
 
 interface AuthenticatedRouteRouteChildren {
   AuthenticatedAlertsRouteRoute: typeof AuthenticatedAlertsRouteRouteWithChildren
+  AuthenticatedIocsRouteRoute: typeof AuthenticatedIocsRouteRoute
+  AuthenticatedLogsRouteRoute: typeof AuthenticatedLogsRouteRoute
   AuthenticatedRulesRouteRoute: typeof AuthenticatedRulesRouteRouteWithChildren
   AuthenticatedSettingsRouteLazyRoute: typeof AuthenticatedSettingsRouteLazyRouteWithChildren
   AuthenticatedIndexRoute: typeof AuthenticatedIndexRoute
@@ -621,6 +651,8 @@ interface AuthenticatedRouteRouteChildren {
 
 const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedAlertsRouteRoute: AuthenticatedAlertsRouteRouteWithChildren,
+  AuthenticatedIocsRouteRoute: AuthenticatedIocsRouteRoute,
+  AuthenticatedLogsRouteRoute: AuthenticatedLogsRouteRoute,
   AuthenticatedRulesRouteRoute: AuthenticatedRulesRouteRouteWithChildren,
   AuthenticatedSettingsRouteLazyRoute:
     AuthenticatedSettingsRouteLazyRouteWithChildren,
@@ -641,6 +673,8 @@ const AuthenticatedRouteRouteWithChildren =
 export interface FileRoutesByFullPath {
   '': typeof AuthenticatedRouteRouteWithChildren
   '/alerts': typeof AuthenticatedAlertsRouteRouteWithChildren
+  '/iocs': typeof AuthenticatedIocsRouteRoute
+  '/logs': typeof AuthenticatedLogsRouteRoute
   '/rules': typeof AuthenticatedRulesRouteRouteWithChildren
   '/500': typeof errors500LazyRoute
   '/otp': typeof authOtpRoute
@@ -672,6 +706,8 @@ export interface FileRoutesByFullPath {
 }
 
 export interface FileRoutesByTo {
+  '/iocs': typeof AuthenticatedIocsRouteRoute
+  '/logs': typeof AuthenticatedLogsRouteRoute
   '/500': typeof errors500LazyRoute
   '/otp': typeof authOtpRoute
   '/sign-in': typeof authSignInRoute
@@ -704,6 +740,8 @@ export interface FileRoutesById {
   __root__: typeof rootRoute
   '/_authenticated': typeof AuthenticatedRouteRouteWithChildren
   '/_authenticated/alerts': typeof AuthenticatedAlertsRouteRouteWithChildren
+  '/_authenticated/iocs': typeof AuthenticatedIocsRouteRoute
+  '/_authenticated/logs': typeof AuthenticatedLogsRouteRoute
   '/_authenticated/rules': typeof AuthenticatedRulesRouteRouteWithChildren
   '/(auth)/500': typeof auth500Route
   '/(auth)/otp': typeof authOtpRoute
@@ -740,6 +778,8 @@ export interface FileRouteTypes {
   fullPaths:
     | ''
     | '/alerts'
+    | '/iocs'
+    | '/logs'
     | '/rules'
     | '/500'
     | '/otp'
@@ -770,6 +810,8 @@ export interface FileRouteTypes {
     | '/agents/register'
   fileRoutesByTo: FileRoutesByTo
   to:
+    | '/iocs'
+    | '/logs'
     | '/500'
     | '/otp'
     | '/sign-in'
@@ -800,6 +842,8 @@ export interface FileRouteTypes {
     | '__root__'
     | '/_authenticated'
     | '/_authenticated/alerts'
+    | '/_authenticated/iocs'
+    | '/_authenticated/logs'
     | '/_authenticated/rules'
     | '/(auth)/500'
     | '/(auth)/otp'
@@ -890,6 +934,8 @@ export const routeTree = rootRoute
       "filePath": "_authenticated/route.tsx",
       "children": [
         "/_authenticated/alerts",
+        "/_authenticated/iocs",
+        "/_authenticated/logs",
         "/_authenticated/rules",
         "/_authenticated/settings",
         "/_authenticated/",
@@ -909,6 +955,14 @@ export const routeTree = rootRoute
       "children": [
         "/_authenticated/alerts/"
       ]
+    },
+    "/_authenticated/iocs": {
+      "filePath": "_authenticated/iocs/route.tsx",
+      "parent": "/_authenticated"
+    },
+    "/_authenticated/logs": {
+      "filePath": "_authenticated/logs/route.tsx",
+      "parent": "/_authenticated"
     },
     "/_authenticated/rules": {
       "filePath": "_authenticated/rules/route.tsx",

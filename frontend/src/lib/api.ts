@@ -10,7 +10,30 @@ export const api = axios.create({
     'Content-Type': 'application/json',
     'X-API-Key': API_KEY
   },
+  timeout: 10000, // 10 seconds timeout
 })
+
+// Add response interceptor for error handling
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    // Log the error for debugging
+    console.error('API Error:', error.message);
+    
+    if (error.response) {
+      // The request was made and the server responded with a status code
+      // that falls out of the range of 2xx
+      console.error('Error status:', error.response.status);
+      console.error('Error data:', error.response.data);
+    } else if (error.request) {
+      // The request was made but no response was received
+      console.error('No response received:', error.request);
+    }
+    
+    // Forward the error to the caller
+    return Promise.reject(error);
+  }
+);
 
 // Mock data for development/testing
 const MOCK_STATS = {
@@ -187,5 +210,83 @@ export const agentsApi = {
   registerAgent: async (agentData: any) => {
     const response = await api.post('/api/agents/register', agentData)
     return response.data
+  }
+}
+
+// IOCs API functions
+export const iocsApi = {
+  getAllIOCs: async () => {
+    const response = await api.get('/api/iocs')
+    return response.data
+  },
+  
+  getIOCsByType: async (iocType: 'ip' | 'hash' | 'url' | 'process') => {
+    const response = await api.get(`/api/iocs/${iocType}`)
+    return response.data
+  },
+  
+  addIpIOC: async (data: { value: string, description?: string, severity?: string }) => {
+    const response = await api.post('/api/iocs/ip', data)
+    return response.data
+  },
+  
+  addHashIOC: async (data: { value: string, hash_type: string, description?: string, severity?: string }) => {
+    const response = await api.post('/api/iocs/hash', data)
+    return response.data
+  },
+  
+  addUrlIOC: async (data: { value: string, description?: string, severity?: string }) => {
+    const response = await api.post('/api/iocs/url', data)
+    return response.data
+  },
+  
+  addProcessIOC: async (data: { value: string, description?: string, severity?: string }) => {
+    const response = await api.post('/api/iocs/process', data)
+    return response.data
+  },
+  
+  removeIOC: async (iocType: 'ip' | 'hash' | 'url' | 'process', value: string) => {
+    const response = await api.delete(`/api/iocs/${iocType}/${encodeURIComponent(value)}`)
+    return response.data
+  }
+}
+
+// Logs API functions
+export const logsApi = {
+  getLogTypes: async () => {
+    try {
+      const response = await api.get('/api/logs/types')
+      return response.data
+    } catch (error) {
+      console.error('Error getting log types:', error)
+      throw error
+    }
+  },
+  
+  getLogs: async (
+    logType: string, 
+    options?: { 
+      lines?: number, 
+      search?: string, 
+      level?: string, 
+      since?: string 
+    }
+  ) => {
+    try {
+      const params = new URLSearchParams()
+      if (options?.lines) params.append('lines', options.lines.toString())
+      if (options?.search) params.append('search', options.search)
+      if (options?.level) params.append('level', options.level)
+      if (options?.since) params.append('since', options.since)
+      
+      const queryString = params.toString()
+      const url = `/api/logs/${logType}${queryString ? `?${queryString}` : ''}`
+      
+      const response = await api.get(url)
+      return response.data
+    } catch (error) {
+      console.error(`Error getting logs for type ${logType}:`, error)
+      throw error
+    }
   }
 } 

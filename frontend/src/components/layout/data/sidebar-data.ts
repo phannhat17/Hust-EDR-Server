@@ -4,6 +4,8 @@ import {
   IconRuler,
   IconServer,
   IconShield,
+  IconFileDescription,
+  IconTargetArrow,
 } from '@tabler/icons-react'
 import { type SidebarData } from '../types'
 
@@ -43,6 +45,16 @@ export const sidebarData: SidebarData = {
           title: 'Agents',
           url: '/agents',
           icon: IconServer,
+        },
+        {
+          title: 'IOCs',
+          url: '/iocs' as any,
+          icon: IconTargetArrow,
+        },
+        {
+          title: 'Logs',
+          url: '/logs' as any,
+          icon: IconFileDescription,
         },
       ],
     },
