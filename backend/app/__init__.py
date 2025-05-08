@@ -135,11 +135,11 @@ def create_app():
             return
             
         # Check API key for all other API endpoints
-        # if request.path.startswith('/api/'):
-        #     api_key = request.headers.get(config.API_KEY_HEADER)
-        #     if api_key != config.API_KEY:
-        #         logger.warning(f"Unauthorized access attempt from {request.remote_addr} - invalid API key")
-        #         return jsonify({"error": "Unauthorized - Invalid API key"}), 401
+        if request.path.startswith('/api/'):
+            api_key = request.headers.get(config.API_KEY_HEADER)
+            if api_key != config.API_KEY:
+                logger.warning(f"Unauthorized access attempt from {request.remote_addr} - invalid API key")
+                return jsonify({"error": "Unauthorized - Invalid API key"}), 401
     
     # Health check endpoint (no auth required)
     @app.route('/health')
