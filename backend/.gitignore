@@ -33,7 +33,7 @@ ENV/
 
 # Logs
 *.log
-logs/
+# logs/
 
 # Local configuration
 .env

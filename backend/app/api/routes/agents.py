@@ -182,4 +182,33 @@ def get_agent(agent_id):
         logger.error(f"Error in get_agent endpoint: {str(e)}")
         import traceback
         logger.error(traceback.format_exc())
+        return jsonify({"error": str(e)}), 500
+
+@agents_bp.route('/<agent_id>/ioc-matches', methods=['GET'])
+def get_agent_ioc_matches(agent_id):
+    """Get IOC matches for a specific agent."""
+    try:
+        # Path to the IOC matches file
+        data_dir = os.path.join(current_app.root_path, '..', 'data')
+        ioc_matches_file = os.path.join(data_dir, 'ioc_matches.json')
+        
+        logger.info(f"Loading IOC matches from {ioc_matches_file}")
+        
+        if not os.path.exists(ioc_matches_file):
+            logger.warning(f"IOC matches file not found at {ioc_matches_file}")
+            return jsonify([])
+        
+        with open(ioc_matches_file, 'r') as f:
+            all_matches = json.load(f)
+        
+        # Filter matches for the requested agent
+        agent_matches = [match for match in all_matches if match.get('agent_id') == agent_id]
+        
+        logger.info(f"Found {len(agent_matches)} IOC matches for agent {agent_id}")
+        return jsonify(agent_matches)
+        
+    except Exception as e:
+        logger.error(f"Error in get_agent_ioc_matches endpoint: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
         return jsonify({"error": str(e)}), 500 

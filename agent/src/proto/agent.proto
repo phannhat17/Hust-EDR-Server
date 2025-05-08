@@ -4,104 +4,34 @@ package edr;
 
 option go_package = "agent/proto";
 
-// The EDR service definition
+// EDR agent service
 service EDRService {
-  // Agent registration and heartbeat
-  rpc RegisterAgent(AgentInfo) returns (RegisterResponse) {}
+  // Register agent with the server
+  rpc RegisterAgent(RegisterRequest) returns (RegisterResponse);
   
-  // Periodic status updates from agent
-  rpc UpdateStatus(AgentStatus) returns (StatusResponse) {}
+  // Update agent status
+  rpc UpdateStatus(StatusRequest) returns (StatusResponse);
   
-  // Command execution stream from server to agent
-  rpc ReceiveCommands(CommandRequest) returns (stream Command) {}
+  // Stream for agent to receive commands
+  rpc ReceiveCommands(CommandRequest) returns (stream Command);
   
-  // Command result reporting from agent to server
-  rpc ReportCommandResult(CommandResult) returns (CommandAck) {}
+  // Report command execution result
+  rpc ReportCommandResult(CommandResult) returns (CommandAck);
   
-  // List registered agents
-  rpc ListAgents(ListAgentsRequest) returns (ListAgentsResponse) {}
+  // Send command to agent (server-initiated)
+  rpc SendCommand(SendCommandRequest) returns (SendCommandResponse);
   
-  // Send a command to an agent
-  rpc SendCommand(SendCommandRequest) returns (SendCommandResponse) {}
+  // List all agents
+  rpc ListAgents(ListAgentsRequest) returns (ListAgentsResponse);
+  
+  // New: Get IOCs from server
+  rpc GetIOCs(IOCRequest) returns (IOCResponse);
+  
+  // New: Report IOC match from agent
+  rpc ReportIOCMatch(IOCMatchReport) returns (IOCMatchAck);
 }
 
-// Information about the agent
-message AgentInfo {
-  string agent_id = 1;           // Unique identifier for the agent
-  string hostname = 2;           // System hostname
-  string ip_address = 3;         // Primary IP address
-  string mac_address = 4;        // MAC address
-  string username = 5;           // Current logged in user
-  string os_version = 6;         // OS version including build level
-  string agent_version = 7;      // Agent software version
-  int64 registration_time = 8;   // Unix timestamp of registration
-}
-
-// Status update from the agent
-message AgentStatus {
-  string agent_id = 1;           // Unique identifier for the agent
-  int64 timestamp = 2;           // Unix timestamp of status update
-  string status = 3;             // Status (ONLINE, BUSY, etc.)
-  SystemMetrics system_metrics = 4; // Basic system metrics
-}
-
-// Basic system metrics
-message SystemMetrics {
-  double cpu_usage = 1;          // CPU usage percentage
-  double memory_usage = 2;       // Memory usage percentage
-  int64 uptime = 3;              // System uptime in seconds
-}
-
-// Response to agent registration
-message RegisterResponse {
-  string server_message = 1;     // Message from server
-  bool success = 2;              // Success status
-  string assigned_id = 3;        // Server-assigned ID (if different)
-  int64 server_time = 4;         // Server timestamp
-}
-
-// Response to status update
-message StatusResponse {
-  string server_message = 1;     // Message from server
-  bool acknowledged = 2;         // Whether update was acknowledged
-  int64 server_time = 3;         // Server timestamp
-}
-
-// Command request from agent to receive commands
-message CommandRequest {
-  string agent_id = 1;           // Unique identifier for the agent
-  int64 last_command_time = 2;   // Last command timestamp processed
-}
-
-// Command from server to agent
-message Command {
-  string command_id = 1;         // Unique command identifier
-  string agent_id = 2;           // Target agent ID
-  int64 timestamp = 3;           // Command issue timestamp
-  CommandType type = 4;          // Type of command
-  map<string, string> params = 5; // Command parameters
-  int32 priority = 6;            // Command priority (higher = more urgent)
-  int64 timeout = 7;             // Command timeout in seconds
-}
-
-// Command execution result
-message CommandResult {
-  string command_id = 1;         // Command ID this result is for
-  string agent_id = 2;           // Agent ID that executed the command
-  bool success = 3;              // Whether command succeeded
-  string message = 4;            // Result message or error details
-  int64 execution_time = 5;      // Unix timestamp of execution
-  int64 duration_ms = 6;         // Execution duration in milliseconds
-}
-
-// Command acknowledgment from server
-message CommandAck {
-  string command_id = 1;         // Command ID being acknowledged
-  bool received = 2;             // Whether server received the result
-  string message = 3;            // Optional server message
-}
-
-// Command types enum
+// Command types
 enum CommandType {
   UNKNOWN = 0;
   DELETE_FILE = 1;
@@ -111,23 +41,172 @@ enum CommandType {
   BLOCK_URL = 5;
   NETWORK_ISOLATE = 6;
   NETWORK_RESTORE = 7;
+  UPDATE_IOCS = 8;  // New command type for IOC updates
 }
 
-// Messages for ListAgents
-message ListAgentsRequest {
-  // Empty request
+// IOC types
+enum IOCType {
+  IOC_UNKNOWN = 0;
+  IOC_IP = 1;
+  IOC_HASH = 2;
+  IOC_URL = 3;
 }
 
-message ListAgentsResponse {
-  repeated AgentInfo agents = 1;
+// Agent registration request
+message RegisterRequest {
+  string agent_id = 1;
+  string hostname = 2;
+  string ip_address = 3;
+  string mac_address = 4;
+  string username = 5;
+  string os_version = 6;
+  string agent_version = 7;
+  int64 registration_time = 8;
 }
 
-// Messages for SendCommand
+// Agent registration response
+message RegisterResponse {
+  string server_message = 1;
+  bool success = 2;
+  string assigned_id = 3;
+  int64 server_time = 4;
+}
+
+// Status update request
+message StatusRequest {
+  string agent_id = 1;
+  int64 timestamp = 2;
+  string status = 3;
+  SystemMetrics system_metrics = 4;
+}
+
+// System metrics
+message SystemMetrics {
+  double cpu_usage = 1;
+  double memory_usage = 2;
+  int64 uptime = 3;
+}
+
+// Status update response
+message StatusResponse {
+  string server_message = 1;
+  bool acknowledged = 2;
+  int64 server_time = 3;
+}
+
+// Command request (for stream)
+message CommandRequest {
+  string agent_id = 1;
+  int64 timestamp = 2;
+}
+
+// Command to execute
+message Command {
+  string command_id = 1;
+  string agent_id = 2;
+  int64 timestamp = 3;
+  CommandType type = 4;
+  map<string, string> params = 5;
+  int32 priority = 6;
+  int32 timeout = 7;
+}
+
+// Command execution result
+message CommandResult {
+  string command_id = 1;
+  string agent_id = 2;
+  bool success = 3;
+  string message = 4;
+  int64 execution_time = 5;
+  int64 duration_ms = 6;
+}
+
+// Command acknowledgment
+message CommandAck {
+  string command_id = 1;
+  bool received = 2;
+  string message = 3;
+}
+
+// Send command request
 message SendCommandRequest {
   Command command = 1;
 }
 
+// Send command response
 message SendCommandResponse {
   bool success = 1;
   string message = 2;
+}
+
+// List agents request
+message ListAgentsRequest {
+  // Empty for now, may add filters later
+}
+
+// Agent information
+message AgentInfo {
+  string agent_id = 1;
+  string hostname = 2;
+  string ip_address = 3;
+  string mac_address = 4;
+  string username = 5;
+  string os_version = 6;
+  string agent_version = 7;
+  int64 registration_time = 8;
+}
+
+// List agents response
+message ListAgentsResponse {
+  repeated AgentInfo agents = 1;
+}
+
+// New: IOC request from agent
+message IOCRequest {
+  string agent_id = 1;
+  int64 current_version = 2; // Current IOC version on agent
+  repeated IOCType requested_types = 3; // Types of IOCs being requested
+}
+
+// New: IOC data
+message IOCData {
+  string value = 1; // The IOC value (IP, hash, etc.)
+  string description = 2;
+  string severity = 3; // low, medium, high, critical
+  map<string, string> metadata = 4; // Additional metadata
+}
+
+// New: IOC response from server
+message IOCResponse {
+  bool update_available = 1;
+  int64 version = 2;
+  int64 timestamp = 3;
+  map<string, IOCData> ip_addresses = 4;
+  map<string, IOCData> file_hashes = 5;
+  map<string, IOCData> urls = 6;
+}
+
+// New: IOC match report from agent
+message IOCMatchReport {
+  string report_id = 1;
+  string agent_id = 2;
+  int64 timestamp = 3;
+  IOCType type = 4;
+  string ioc_value = 5;
+  string matched_value = 6; // The actual value that matched (useful for partial matches)
+  string context = 7; // Additional context about the match
+  string severity = 8;
+  CommandType action_taken = 9; // Action taken by agent, if any
+  bool action_success = 10;
+  string action_message = 11;
+}
+
+// New: IOC match acknowledgment
+message IOCMatchAck {
+  string report_id = 1;
+  bool received = 2;
+  string message = 3;
+  bool perform_additional_action = 4; // Server can request additional action
+  CommandType additional_action = 5; // Additional action to take
+  map<string, string> action_params = 6; // Parameters for additional action
 } 

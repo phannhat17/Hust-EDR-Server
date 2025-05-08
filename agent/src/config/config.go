@@ -1,42 +1,61 @@
 package config
 
 import (
-	"time"
+	"fmt"
+	"os"
+
+	"gopkg.in/yaml.v3"
 )
 
-// Config holds the agent configuration parameters
+// Config represents the agent configuration
 type Config struct {
-	// ServerAddress is the gRPC server address (host:port)
-	ServerAddress string
-
-	// UpdateInterval is the interval between status updates
-	UpdateInterval time.Duration
-
-	// TLSEnabled indicates whether to use TLS for gRPC connections
-	TLSEnabled bool
-
-	// InsecureSkipVerify allows skipping TLS certificate verification
-	InsecureSkipVerify bool
-
-	// AgentVersion is the current agent software version
-	AgentVersion string
-
-	// LogFile is the path to the log file
-	LogFile string
-
-	// Debug enables debug logging
-	Debug bool
+	ServerAddress string `yaml:"server_address"`
+	AgentID       string `yaml:"agent_id"`
+	LogFile       string `yaml:"log_file"`
+	DataDir       string `yaml:"data_dir"`
+	ScanInterval  int    `yaml:"scan_interval"`
+	Version       string `yaml:"version"`
 }
 
-// DefaultConfig returns a Config with default values
-func DefaultConfig() *Config {
-	return &Config{
-		ServerAddress:      "localhost:50051",
-		UpdateInterval:     60 * time.Second,
-		TLSEnabled:         false,
-		InsecureSkipVerify: false,
-		AgentVersion:       "1.0.0",
-		LogFile:            "",
-		Debug:              false,
+// LoadConfig loads configuration from a YAML file
+func LoadConfig(filename string) (*Config, error) {
+	// Read file contents
+	data, err := os.ReadFile(filename)
+	if err != nil {
+		return nil, err
 	}
+
+	// Unmarshal YAML
+	var cfg Config
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return nil, fmt.Errorf("failed to parse config file: %v", err)
+	}
+
+	// Set defaults for empty values
+	if cfg.ServerAddress == "" {
+		cfg.ServerAddress = "localhost:50051"
+	}
+	if cfg.DataDir == "" {
+		cfg.DataDir = "data"
+	}
+	if cfg.ScanInterval <= 0 {
+		cfg.ScanInterval = 30
+	}
+	if cfg.Version == "" {
+		cfg.Version = "1.0.0"
+	}
+
+	return &cfg, nil
+}
+
+// SaveConfig saves configuration to a YAML file
+func SaveConfig(filename string, cfg *Config) error {
+	// Marshal to YAML
+	data, err := yaml.Marshal(cfg)
+	if err != nil {
+		return fmt.Errorf("failed to marshal config: %v", err)
+	}
+
+	// Write to file
+	return os.WriteFile(filename, data, 0644)
 } 

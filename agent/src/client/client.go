@@ -2,126 +2,242 @@ package client
 
 import (
 	"context"
-	"crypto/tls"
 	"fmt"
+	"io"
 	"log"
+	"math"
 	"time"
 
-	"agent/config"
-	pb "agent/proto"
-
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
+
+	pb "agent/proto"
 )
 
-// EDRClient represents the gRPC client for communicating with the EDR server
+// EDRClient represents a client for communicating with the EDR server
 type EDRClient struct {
-	client  pb.EDRServiceClient
-	conn    *grpc.ClientConn
-	config  *config.Config
+	serverAddress string
+	agentID       string
+	conn          *grpc.ClientConn
+	edrClient     pb.EDRServiceClient
+	cmdHandler    *CommandHandler
+	agentVersion  string
 }
 
-// NewClient creates a new EDR client with the provided configuration
-func NewClient(cfg *config.Config) (*EDRClient, error) {
-	var opts []grpc.DialOption
-
-	// Configure security options
-	if cfg.TLSEnabled {
-		// Configure TLS if enabled
-		tlsConfig := &tls.Config{
-			InsecureSkipVerify: cfg.InsecureSkipVerify,
-		}
-		creds := credentials.NewTLS(tlsConfig)
-		opts = append(opts, grpc.WithTransportCredentials(creds))
-	} else {
-		// Use insecure connection if TLS not enabled
-		opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
-	}
-
-	// Set connection timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	opts = append(opts, grpc.WithBlock())
-
-	// Log connection attempt
-	log.Printf("Attempting to connect to server at %s...", cfg.ServerAddress)
-
-	// Connect to the server
-	conn, err := grpc.DialContext(ctx, cfg.ServerAddress, opts...)
+// NewEDRClient creates a new EDR client
+func NewEDRClient(serverAddress, agentID string) (*EDRClient, error) {
+	// Connect to the gRPC server
+	conn, err := grpc.Dial(serverAddress, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to server: %v", err)
 	}
 
-	// Create gRPC client
-	client := pb.NewEDRServiceClient(conn)
+	// Create client
+	client := &EDRClient{
+		serverAddress: serverAddress,
+		agentID:       agentID,
+		conn:          conn,
+		edrClient:     pb.NewEDRServiceClient(conn),
+		agentVersion:  "1.0.0", // Default version
+	}
 
-	log.Printf("Successfully connected to server at %s", cfg.ServerAddress)
+	// Create command handler
+	client.cmdHandler = NewCommandHandler(client)
 
-	return &EDRClient{
-		client: client,
-		conn:   conn,
-		config: cfg,
+	return client, nil
+}
+
+// SetAgentVersion sets the agent version
+func (c *EDRClient) SetAgentVersion(version string) {
+	c.agentVersion = version
+}
+
+// Register registers the agent with the server
+func (c *EDRClient) Register(ctx context.Context) (*AgentInfo, error) {
+	// Gather system information
+	hostname, err := getHostname()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get hostname: %v", err)
+	}
+
+	ipAddress, err := getIPAddress()
+	if err != nil {
+		log.Printf("Warning: failed to get IP address: %v", err)
+		ipAddress = "unknown"
+	}
+
+	macAddress, err := getMACAddress()
+	if err != nil {
+		log.Printf("Warning: failed to get MAC address: %v", err)
+		macAddress = "unknown"
+	}
+
+	username, err := getUsername()
+	if err != nil {
+		log.Printf("Warning: failed to get username: %v", err)
+		username = "unknown"
+	}
+
+	osVersion, err := getOSVersion()
+	if err != nil {
+		log.Printf("Warning: failed to get OS version: %v", err)
+		osVersion = "unknown"
+	}
+
+	// Create registration request
+	req := &pb.RegisterRequest{
+		AgentId:         c.agentID,
+		Hostname:        hostname,
+		IpAddress:       ipAddress,
+		MacAddress:      macAddress,
+		Username:        username,
+		OsVersion:       osVersion,
+		AgentVersion:    c.agentVersion,
+		RegistrationTime: time.Now().Unix(),
+	}
+
+	// Send registration request
+	resp, err := c.edrClient.RegisterAgent(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to register with server: %v", err)
+	}
+
+	// If server assigned a new ID, update our agent ID
+	if resp.AssignedId != "" {
+		c.agentID = resp.AssignedId
+	}
+
+	// Return agent info
+	return &AgentInfo{
+		AgentID:       c.agentID,
+		Hostname:      hostname,
+		IPAddress:     ipAddress,
+		MACAddress:    macAddress,
+		Username:      username,
+		OSVersion:     osVersion,
+		AgentVersion:  c.agentVersion,
+		RegisteredAt:  time.Now(),
+		ServerMessage: resp.ServerMessage,
 	}, nil
+}
+
+// UpdateStatus sends a status update to the server
+func (c *EDRClient) UpdateStatus(ctx context.Context, status string, metrics map[string]float64) error {
+	// Create system metrics
+	sysMetrics := &pb.SystemMetrics{
+		CpuUsage:    metrics["cpu_usage"],
+		MemoryUsage: metrics["memory_usage"],
+		Uptime:      int64(metrics["uptime"]),
+	}
+
+	// Create status request
+	req := &pb.StatusRequest{
+		AgentId:       c.agentID,
+		Timestamp:     time.Now().Unix(),
+		Status:        status,
+		SystemMetrics: sysMetrics,
+	}
+
+	// Send status update
+	resp, err := c.edrClient.UpdateStatus(ctx, req)
+	if err != nil {
+		return fmt.Errorf("failed to update status: %v", err)
+	}
+
+	if !resp.Acknowledged {
+		return fmt.Errorf("status update not acknowledged: %s", resp.ServerMessage)
+	}
+
+	return nil
+}
+
+// StartCommandStream starts a stream to receive commands from the server
+func (c *EDRClient) StartCommandStream(ctx context.Context) {
+	// Track failed connection attempts for backoff strategy
+	consecutiveFailures := 0
+	maxBackoff := 60 * time.Second
+	
+	for {
+		select {
+		case <-ctx.Done():
+			log.Println("Command stream stopped due to context cancellation")
+			return
+		default:
+			// Calculate backoff time based on consecutive failures
+			backoffTime := time.Duration(math.Min(float64(5*consecutiveFailures), float64(maxBackoff.Seconds()))) * time.Second
+			
+			// Create command stream request
+			req := &pb.CommandRequest{
+				AgentId:   c.agentID,
+				Timestamp: time.Now().Unix(),
+			}
+
+			// Start command stream
+			stream, err := c.edrClient.ReceiveCommands(ctx, req)
+	if err != nil {
+				consecutiveFailures++
+				log.Printf("Failed to start command stream (attempt #%d): %v", consecutiveFailures, err)
+				log.Printf("Will retry in %v seconds", backoffTime.Seconds())
+				time.Sleep(backoffTime) // Wait with exponential backoff
+				continue
+			}
+			
+			// Reset failure counter on successful connection
+			consecutiveFailures = 0
+			log.Println("Command stream established")
+
+			// Process commands from stream
+			for {
+				cmd, err := stream.Recv()
+				if err != nil {
+					if err == io.EOF {
+						log.Println("Command stream ended by server")
+					} else {
+						log.Printf("Command stream error: %v", err)
+					}
+					break
+				}
+
+				log.Printf("Received command: %s (Type: %s)", cmd.CommandId, cmd.Type.String())
+
+				// Process command in a separate goroutine
+				go func(command *pb.Command) {
+					// Execute command
+					result := c.cmdHandler.HandleCommand(ctx, command)
+
+					// Report result
+					_, err := c.edrClient.ReportCommandResult(ctx, result)
+	if err != nil {
+						log.Printf("Failed to report command result: %v", err)
+	}
+				}(cmd)
+			}
+
+			// Wait before reconnecting
+			time.Sleep(5 * time.Second)
+		}
+	}
+}
+
+// GetCommandHandler returns the command handler
+func (c *EDRClient) GetCommandHandler() *CommandHandler {
+	return c.cmdHandler
 }
 
 // Close closes the client connection
 func (c *EDRClient) Close() error {
-	if c.conn != nil {
-		return c.conn.Close()
-	}
-	return nil
+	return c.conn.Close()
 }
 
-// RegisterAgent registers the agent with the server
-func (c *EDRClient) RegisterAgent(ctx context.Context, info *pb.AgentInfo) (*pb.RegisterResponse, error) {
-	log.Printf("Registering agent %s with server...", info.AgentId)
-	response, err := c.client.RegisterAgent(ctx, info)
-	if err != nil {
-		return nil, fmt.Errorf("failed to register agent: %v", err)
-	}
-	log.Printf("Agent registration successful: %s", response.ServerMessage)
-	return response, nil
-}
-
-// UpdateStatus sends a status update to the server
-func (c *EDRClient) UpdateStatus(ctx context.Context, status *pb.AgentStatus) (*pb.StatusResponse, error) {
-	log.Printf("Sending status update for agent %s...", status.AgentId)
-	response, err := c.client.UpdateStatus(ctx, status)
-	if err != nil {
-		return nil, fmt.Errorf("failed to send status update: %v", err)
-	}
-	log.Printf("Status update successful: %s", response.ServerMessage)
-	return response, nil
-}
-
-// ReceiveCommands establishes a stream to receive commands from the server
-func (c *EDRClient) ReceiveCommands(ctx context.Context, agentID string, lastCommandTime int64) (pb.EDRService_ReceiveCommandsClient, error) {
-	log.Printf("Establishing command stream for agent %s...", agentID)
-	
-	request := &pb.CommandRequest{
-		AgentId:         agentID,
-		LastCommandTime: lastCommandTime,
-	}
-	
-	stream, err := c.client.ReceiveCommands(ctx, request)
-	if err != nil {
-		return nil, fmt.Errorf("failed to establish command stream: %v", err)
-	}
-	
-	log.Printf("Command stream established for agent %s", agentID)
-	return stream, nil
-}
-
-// ReportCommandResult sends the result of a command execution back to the server
-func (c *EDRClient) ReportCommandResult(ctx context.Context, result *pb.CommandResult) (*pb.CommandAck, error) {
-	log.Printf("Reporting command result for command %s...", result.CommandId)
-	
-	response, err := c.client.ReportCommandResult(ctx, result)
-	if err != nil {
-		return nil, fmt.Errorf("failed to report command result: %v", err)
-	}
-	
-	log.Printf("Command result reported successfully: %s", response.Message)
-	return response, nil
+// AgentInfo represents information about the agent
+type AgentInfo struct {
+	AgentID       string
+	Hostname      string
+	IPAddress     string
+	MACAddress    string
+	Username      string
+	OSVersion     string
+	AgentVersion  string
+	RegisteredAt  time.Time
+	ServerMessage string
 } 
