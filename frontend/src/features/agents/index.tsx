@@ -114,6 +114,7 @@ export default function Agents() {
                     <TableHead>Version</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead>Last Seen</TableHead>
+                    <TableHead>Agent ID</TableHead>
                     <TableHead>Actions</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -122,7 +123,7 @@ export default function Agents() {
                     <TableRow key={agent.id}>
                       <TableCell className="font-medium">{agent.hostname}</TableCell>
                       <TableCell>{agent.ip_address}</TableCell>
-                      <TableCell>{agent.os}</TableCell>
+                      <TableCell>{agent.os_info || agent.os}</TableCell>
                       <TableCell>{agent.version}</TableCell>
                       <TableCell>
                         <Badge variant={isAgentOnline(agent.last_seen) ? "green" : "black"}>
@@ -130,6 +131,9 @@ export default function Agents() {
                         </Badge>
                       </TableCell>
                       <TableCell>{new Date(agent.last_seen).toLocaleString()}</TableCell>
+                      <TableCell className="font-mono text-xs">
+                        {agent.id.length > 10 ? `${agent.id.substring(0, 8)}...` : agent.id}
+                      </TableCell>
                       <TableCell>
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
@@ -185,6 +189,11 @@ export default function Agents() {
                                   </Badge>
                                 )}
                               </DialogTitle>
+                              {selectedAgent && (
+                                <div className="text-sm text-muted-foreground mt-1">
+                                  <span className="font-medium">ID:</span> <span className="font-mono">{selectedAgent.id}</span>
+                                </div>
+                              )}
                             </DialogHeader>
                             {selectedAgent && (
                               <div className="mt-4 space-y-6">
@@ -215,28 +224,32 @@ export default function Agents() {
                                           <h4 className="text-sm font-semibold">Username</h4>
                                           <p className="text-sm">{selectedAgent.username || 'Not available'}</p>
                                         </div>
+                                        <div className="col-span-2">
+                                          <h4 className="text-sm font-semibold">Agent ID</h4>
+                                          <p className="text-sm font-mono">{selectedAgent.id}</p>
+                                        </div>
                                       </div>
                                     </div>
 
                                     {/* System Information */}
                                     <div className="rounded-lg border p-4">
                                       <h3 className="mb-3 text-sm font-medium text-muted-foreground">System Information</h3>
-                                      <div className="grid grid-cols-2 gap-4">
-                                        <div>
-                                          <h4 className="text-sm font-semibold">Operating System</h4>
-                                          <p className="text-sm">{selectedAgent.os}</p>
+                                      <div>
+                                        <h4 className="text-sm font-semibold">Operating System</h4>
+                                        <p className="text-sm mb-4">{selectedAgent.os_version_full || selectedAgent.os}</p>
+                                      </div>
+                                      <div className="grid grid-cols-3 gap-4 mt-2">
+                                        <div className="bg-slate-50 dark:bg-slate-900 p-3 rounded-md">
+                                          <h4 className="text-sm font-semibold text-muted-foreground">CPU Usage</h4>
+                                          <p className="text-lg font-medium">{selectedAgent.cpu_usage !== undefined ? `${selectedAgent.cpu_usage.toFixed(1)}%` : 'N/A'}</p>
                                         </div>
-                                        <div>
-                                          <h4 className="text-sm font-semibold">CPU Usage</h4>
-                                          <p className="text-sm">{selectedAgent.cpu_usage !== undefined ? `${selectedAgent.cpu_usage.toFixed(1)}%` : 'N/A'}</p>
+                                        <div className="bg-slate-50 dark:bg-slate-900 p-3 rounded-md">
+                                          <h4 className="text-sm font-semibold text-muted-foreground">Memory Usage</h4>
+                                          <p className="text-lg font-medium">{selectedAgent.memory_usage !== undefined ? `${selectedAgent.memory_usage.toFixed(1)}%` : 'N/A'}</p>
                                         </div>
-                                        <div>
-                                          <h4 className="text-sm font-semibold">Memory Usage</h4>
-                                          <p className="text-sm">{selectedAgent.memory_usage !== undefined ? `${selectedAgent.memory_usage.toFixed(1)}%` : 'N/A'}</p>
-                                        </div>
-                                        <div>
-                                          <h4 className="text-sm font-semibold">Uptime</h4>
-                                          <p className="text-sm">{selectedAgent.uptime !== undefined 
+                                        <div className="bg-slate-50 dark:bg-slate-900 p-3 rounded-md">
+                                          <h4 className="text-sm font-semibold text-muted-foreground">Uptime</h4>
+                                          <p className="text-lg font-medium">{selectedAgent.uptime !== undefined 
                                             ? formatUptime(selectedAgent.uptime) 
                                             : 'N/A'}</p>
                                         </div>

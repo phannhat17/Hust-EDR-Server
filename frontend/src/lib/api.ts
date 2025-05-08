@@ -225,7 +225,7 @@ export const iocsApi = {
     return response.data
   },
   
-  getIOCsByType: async (iocType: 'ip' | 'hash' | 'url' | 'process') => {
+  getIOCsByType: async (iocType: 'ip' | 'hash' | 'url') => {
     const response = await api.get(`/api/iocs/${iocType}`)
     return response.data
   },
@@ -245,12 +245,7 @@ export const iocsApi = {
     return response.data
   },
   
-  addProcessIOC: async (data: { value: string, description?: string, severity?: string }) => {
-    const response = await api.post('/api/iocs/process', data)
-    return response.data
-  },
-  
-  removeIOC: async (iocType: 'ip' | 'hash' | 'url' | 'process', value: string) => {
+  removeIOC: async (iocType: 'ip' | 'hash' | 'url', value: string) => {
     const response = await api.delete(`/api/iocs/${iocType}/${encodeURIComponent(value)}`)
     return response.data
   }

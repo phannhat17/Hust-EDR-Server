@@ -44,7 +44,7 @@ export const Route = createFileRoute('/_authenticated/iocs')({
   component: IOCsPage
 })
 
-type IOCType = 'ip' | 'hash' | 'url' | 'process'
+type IOCType = 'ip' | 'hash' | 'url'
 type SeverityType = 'low' | 'medium' | 'high' | 'critical'
 type HashType = 'md5' | 'sha1' | 'sha256'
 
@@ -87,8 +87,6 @@ function IOCsPage() {
           return iocsApi.addHashIOC({ value, hash_type: hash_type || 'sha256', description, severity })
         case 'url':
           return iocsApi.addUrlIOC({ value, description, severity })
-        case 'process':
-          return iocsApi.addProcessIOC({ value, description, severity })
       }
     },
     onSuccess: () => {
@@ -156,8 +154,7 @@ function IOCsPage() {
     const iocs = {
       ip: iocsData.iocs.ip_addresses || {},
       hash: iocsData.iocs.file_hashes || {},
-      url: iocsData.iocs.urls || {},
-      process: iocsData.iocs.process_names || {}
+      url: iocsData.iocs.urls || {}
     }
     
     return filterIOCs(iocs[activeTab], searchQuery)
@@ -167,8 +164,7 @@ function IOCsPage() {
   const iocCounts = {
     ip: iocsData?.iocs?.ip_addresses ? Object.keys(iocsData.iocs.ip_addresses).length : 0,
     hash: iocsData?.iocs?.file_hashes ? Object.keys(iocsData.iocs.file_hashes).length : 0,
-    url: iocsData?.iocs?.urls ? Object.keys(iocsData.iocs.urls).length : 0,
-    process: iocsData?.iocs?.process_names ? Object.keys(iocsData.iocs.process_names).length : 0
+    url: iocsData?.iocs?.urls ? Object.keys(iocsData.iocs.urls).length : 0
   }
   
   // Format timestamp
@@ -223,7 +219,7 @@ function IOCsPage() {
       
       <Main>
         <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as IOCType)}>
-          <TabsList className="grid grid-cols-4 w-full max-w-2xl mb-8">
+          <TabsList className="grid grid-cols-3 w-full max-w-2xl mb-8">
             <TabsTrigger value="ip" className="relative">
               IP Addresses
               <Badge className="ml-2 h-5 w-5 p-0 flex items-center justify-center text-xs rounded-full">
@@ -240,12 +236,6 @@ function IOCsPage() {
               URLs
               <Badge className="ml-2 h-5 w-5 p-0 flex items-center justify-center text-xs rounded-full">
                 {iocCounts.url}
-              </Badge>
-            </TabsTrigger>
-            <TabsTrigger value="process">
-              Process Names
-              <Badge className="ml-2 h-5 w-5 p-0 flex items-center justify-center text-xs rounded-full">
-                {iocCounts.process}
               </Badge>
             </TabsTrigger>
           </TabsList>
@@ -397,7 +387,6 @@ function AddIOCDialog({
                 <SelectItem value="ip">IP Address</SelectItem>
                 <SelectItem value="hash">File Hash</SelectItem>
                 <SelectItem value="url">URL</SelectItem>
-                <SelectItem value="process">Process Name</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -472,8 +461,8 @@ function getTabTitle(type: IOCType): string {
       return 'File Hash IOCs'
     case 'url':
       return 'URL IOCs'
-    case 'process':
-      return 'Process Name IOCs'
+    default:
+      return 'Unknown'
   }
 }
 
@@ -482,11 +471,11 @@ function getTabDescription(type: IOCType): string {
     case 'ip':
       return 'Malicious IP addresses that are blocked from communication'
     case 'hash':
-      return 'File hashes of known malware or suspicious files'
+      return 'File hashes of known malicious files to be detected and blocked'
     case 'url':
-      return 'Malicious URLs and domains that are blocked from access'
-    case 'process':
-      return 'Process names that are monitored or blocked on systems'
+      return 'Malicious URLs that are blocked from being accessed'
+    default:
+      return ''
   }
 }
 
@@ -498,8 +487,8 @@ function getValueHeader(type: IOCType): string {
       return 'File Hash'
     case 'url':
       return 'URL'
-    case 'process':
-      return 'Process Name'
+    default:
+      return 'Value'
   }
 }
 
@@ -511,20 +500,20 @@ function getValueLabel(type: IOCType): string {
       return 'File Hash'
     case 'url':
       return 'URL'
-    case 'process':
-      return 'Process Name'
+    default:
+      return 'Value'
   }
 }
 
 function getValuePlaceholder(type: IOCType): string {
   switch (type) {
     case 'ip':
-      return '192.168.1.1'
+      return 'e.g., 192.168.1.1'
     case 'hash':
-      return 'e.g. 5f4dcc3b5aa765d61d8327deb882cf99'
+      return 'e.g., a94a8fe5ccb19ba61c4c0873d391e987982fbbd3'
     case 'url':
-      return 'e.g. https://malicious-site.com'
-    case 'process':
-      return 'e.g. malware.exe'
+      return 'e.g., https://malicious-site.com'
+    default:
+      return ''
   }
 } 

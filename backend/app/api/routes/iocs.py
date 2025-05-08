@@ -26,7 +26,7 @@ def get_all_iocs():
 @iocs_bp.route('/<ioc_type>', methods=['GET'])
 def get_iocs_by_type(ioc_type):
     """Get IOCs by type."""
-    valid_types = ['ip', 'hash', 'url', 'process']
+    valid_types = ['ip', 'hash', 'url']
     if ioc_type not in valid_types:
         return jsonify({"error": f"Invalid IOC type: {ioc_type}. Must be one of {valid_types}"}), 400
     
@@ -107,30 +107,10 @@ def add_url_ioc():
         logger.error(f"Error adding URL IOC: {str(e)}")
         return jsonify({"success": False, "message": f"Failed to add URL IOC: {str(e)}"}), 500
 
-@iocs_bp.route('/process', methods=['POST'])
-def add_process_ioc():
-    """Add a process name to the IOC database."""
-    data = request.json
-    
-    if not data or 'value' not in data:
-        return jsonify({"success": False, "message": "Missing required field: value"}), 400
-    
-    try:
-        success = ioc_manager.add_process_name(
-            process_name=data['value'],
-            description=data.get('description', ''),
-            severity=data.get('severity', 'medium')
-        )
-        
-        return jsonify({"success": True, "message": f"Added process IOC: {data['value']}"})
-    except Exception as e:
-        logger.error(f"Error adding process IOC: {str(e)}")
-        return jsonify({"success": False, "message": f"Failed to add process IOC: {str(e)}"}), 500
-
 @iocs_bp.route('/<ioc_type>/<value>', methods=['DELETE'])
 def remove_ioc(ioc_type, value):
     """Remove an IOC from the database."""
-    valid_types = ['ip', 'hash', 'url', 'process']
+    valid_types = ['ip', 'hash', 'url']
     if ioc_type not in valid_types:
         return jsonify({"success": False, "message": f"Invalid IOC type: {ioc_type}. Must be one of {valid_types}"}), 400
     

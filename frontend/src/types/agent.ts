@@ -32,6 +32,16 @@ export interface Agent {
   os: string;
   
   /**
+   * OS information formatted for display
+   */
+  os_info?: string;
+  
+  /**
+   * Full OS version string
+   */
+  os_version_full?: string;
+  
+  /**
    * Username running the agent
    */
   username: string;

@@ -14,6 +14,9 @@ import (
 	"agent/ioc"
 )
 
+// Define version constant
+const AGENT_VERSION = "1.0.1"
+
 // Command-line arguments
 var (
 	serverAddr  = flag.String("server", "localhost:50051", "Server address")
@@ -55,6 +58,7 @@ func main() {
 			AgentID:       *agentID,
 			LogFile:       *logFile,
 			DataDir:       *dataDir,
+			Version:       AGENT_VERSION,
 		}
 		log.Printf("Using default configuration")
 	} else {
@@ -73,6 +77,15 @@ func main() {
 		if *dataDir != "data" {
 			cfg.DataDir = *dataDir
 		}
+		
+		// Always update the version in config to current version
+		if cfg.Version != AGENT_VERSION {
+			cfg.Version = AGENT_VERSION
+			log.Printf("Updating agent version in config to %s", AGENT_VERSION)
+			if err := config.SaveConfig(*configFile, cfg); err != nil {
+				log.Printf("Failed to save updated version: %v", err)
+			}
+		}
 	}
 
 	// Create and start the EDR client
@@ -80,6 +93,9 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to create EDR client: %v", err)
 	}
+	
+	// Set the agent version
+	edrClient.SetAgentVersion(cfg.Version)
 
 	// Start agent connection
 	ctx, cancel := context.WithCancel(context.Background())

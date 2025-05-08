@@ -6,7 +6,6 @@ import (
 	"crypto/sha1"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -279,7 +278,6 @@ func (s *Scanner) scanWindowsSysmonLogs() {
 			for _, hash := range hashes {
 				parts := strings.SplitN(hash, "=", 2)
 				if len(parts) == 2 {
-					hashType := strings.TrimSpace(parts[0])
 					hashValue := strings.TrimSpace(parts[1])
 					
 					// Check if hash matches IOCs

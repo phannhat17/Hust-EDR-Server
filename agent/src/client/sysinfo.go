@@ -88,6 +88,7 @@ func getMACAddress() (string, error) {
 
 // getUsername returns the current username
 func getUsername() (string, error) {
+	// First try environment variables
 	username := os.Getenv("USER")
 	
 	// Try USERNAME for Windows
@@ -95,12 +96,23 @@ func getUsername() (string, error) {
 		username = os.Getenv("USERNAME")
 	}
 	
+	// Remove domain part if present (Windows domain\username format)
+	if strings.Contains(username, "\\") {
+		parts := strings.Split(username, "\\")
+		username = parts[len(parts)-1]
+	}
+	
+	// Remove $ suffix if it's a computer account
+	if strings.HasSuffix(username, "$") {
+		username = strings.TrimSuffix(username, "$")
+	}
+	
 	// If still empty, try platform-specific commands
 	if username == "" {
 		var cmd *exec.Cmd
 		
 		if runtime.GOOS == "windows" {
-			cmd = exec.Command("whoami")
+			cmd = exec.Command("cmd", "/c", "echo %USERNAME%")
 		} else {
 			cmd = exec.Command("id", "-un")
 		}
@@ -111,10 +123,21 @@ func getUsername() (string, error) {
 		}
 		
 		username = strings.TrimSpace(string(output))
+		
+		// Again, remove domain part if present
+		if strings.Contains(username, "\\") {
+			parts := strings.Split(username, "\\")
+			username = parts[len(parts)-1]
+		}
+		
+		// Remove $ suffix if it's a computer account
+		if strings.HasSuffix(username, "$") {
+			username = strings.TrimSuffix(username, "$")
+		}
 	}
 	
 	if username == "" {
-		return "", fmt.Errorf("could not determine username")
+		username = "Unknown User"
 	}
 	
 	return username, nil
@@ -124,12 +147,28 @@ func getUsername() (string, error) {
 func getOSVersion() (string, error) {
 	switch runtime.GOOS {
 	case "windows":
-		cmd := exec.Command("cmd", "/c", "ver")
+		// Most reliable way to get detailed Windows version info
+		cmd := exec.Command("cmd", "/c", "wmic os get Caption /value")
 		output, err := cmd.Output()
-		if err != nil {
-			return fmt.Sprintf("Windows %s", runtime.GOARCH), nil
+		if err == nil && len(output) > 0 {
+			caption := strings.TrimSpace(string(output))
+			caption = strings.Replace(caption, "Caption=", "", 1)
+			caption = strings.TrimSpace(caption)
+			
+			if caption != "" {
+				return caption, nil
+			}
 		}
-		return strings.TrimSpace(string(output)), nil
+		
+		// Fallback to ver command
+		cmd = exec.Command("cmd", "/c", "ver")
+		output, err = cmd.Output()
+		if err == nil {
+			return strings.TrimSpace(string(output)), nil
+		}
+		
+		// Ultimate fallback
+		return fmt.Sprintf("Windows %s", runtime.GOARCH), nil
 		
 	case "darwin":
 		cmd := exec.Command("sw_vers", "-productVersion")

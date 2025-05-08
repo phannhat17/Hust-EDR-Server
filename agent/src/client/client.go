@@ -21,6 +21,7 @@ type EDRClient struct {
 	conn          *grpc.ClientConn
 	edrClient     pb.EDRServiceClient
 	cmdHandler    *CommandHandler
+	agentVersion  string
 }
 
 // NewEDRClient creates a new EDR client
@@ -37,12 +38,18 @@ func NewEDRClient(serverAddress, agentID string) (*EDRClient, error) {
 		agentID:       agentID,
 		conn:          conn,
 		edrClient:     pb.NewEDRServiceClient(conn),
-}
+		agentVersion:  "1.0.0", // Default version
+	}
 
 	// Create command handler
 	client.cmdHandler = NewCommandHandler(client)
 
 	return client, nil
+}
+
+// SetAgentVersion sets the agent version
+func (c *EDRClient) SetAgentVersion(version string) {
+	c.agentVersion = version
 }
 
 // Register registers the agent with the server
@@ -85,7 +92,7 @@ func (c *EDRClient) Register(ctx context.Context) (*AgentInfo, error) {
 		MacAddress:      macAddress,
 		Username:        username,
 		OsVersion:       osVersion,
-		AgentVersion:    "1.0.0",
+		AgentVersion:    c.agentVersion,
 		RegistrationTime: time.Now().Unix(),
 	}
 
@@ -108,7 +115,7 @@ func (c *EDRClient) Register(ctx context.Context) (*AgentInfo, error) {
 		MACAddress:    macAddress,
 		Username:      username,
 		OSVersion:     osVersion,
-		AgentVersion:  "1.0.0",
+		AgentVersion:  c.agentVersion,
 		RegisteredAt:  time.Now(),
 		ServerMessage: resp.ServerMessage,
 	}, nil

@@ -37,8 +37,7 @@ class IOCManager:
         self.iocs = {
             'ip_addresses': {},    # IP -> {added_at, description, severity}
             'file_hashes': {},     # Hash -> {hash_type, added_at, description, severity}
-            'urls': {},            # URL -> {added_at, description, severity}
-            'process_names': {}    # Name -> {added_at, description, severity}
+            'urls': {}             # URL -> {added_at, description, severity}
         }
         
         # Initialize version tracking
@@ -107,8 +106,7 @@ class IOCManager:
         return (
             len(self.iocs['ip_addresses']) + 
             len(self.iocs['file_hashes']) + 
-            len(self.iocs['urls']) + 
-            len(self.iocs['process_names'])
+            len(self.iocs['urls'])
         )
     
     def add_ip(self, ip, description="", severity="medium"):
@@ -187,35 +185,11 @@ class IOCManager:
         self._save_iocs()
         return True
     
-    def add_process_name(self, process_name, description="", severity="medium"):
-        """Add a process name to the IOC database.
-        
-        Args:
-            process_name (str): Process name to add
-            description (str): Description of the threat
-            severity (str): Severity level (low, medium, high, critical)
-            
-        Returns:
-            bool: True if added successfully
-        """
-        # Store process names in lowercase for case-insensitive matching
-        process_name = process_name.lower()
-        
-        self.iocs['process_names'][process_name] = {
-            'added_at': int(time.time()),
-            'description': description,
-            'severity': severity
-        }
-        
-        logger.info(f"Added process name IOC: {process_name} ({severity})")
-        self._save_iocs()
-        return True
-    
     def remove_ioc(self, ioc_type, value):
         """Remove an IOC from the database.
         
         Args:
-            ioc_type (str): Type of IOC (ip, hash, url, process)
+            ioc_type (str): Type of IOC (ip, hash, url)
             value (str): Value to remove
             
         Returns:
@@ -234,11 +208,6 @@ class IOCManager:
         elif ioc_type == 'url' and value in self.iocs['urls']:
             del self.iocs['urls'][value]
             logger.info(f"Removed URL IOC: {value}")
-            self._save_iocs()
-            return True
-        elif ioc_type == 'process' and value in self.iocs['process_names']:
-            del self.iocs['process_names'][value]
-            logger.info(f"Removed process IOC: {value}")
             self._save_iocs()
             return True
         else:
@@ -262,7 +231,7 @@ class IOCManager:
         """Get IOCs of a specific type.
         
         Args:
-            ioc_type (str): Type of IOC (ip, hash, url, process)
+            ioc_type (str): Type of IOC (ip, hash, url)
             
         Returns:
             dict: IOCs of the specified type
@@ -273,8 +242,6 @@ class IOCManager:
             return self.iocs['file_hashes']
         elif ioc_type == 'url':
             return self.iocs['urls']
-        elif ioc_type == 'process':
-            return self.iocs['process_names']
         else:
             logger.warning(f"Unknown IOC type: {ioc_type}")
             return {}
@@ -333,16 +300,6 @@ class IOCManager:
                     if url in self.iocs['urls']:
                         results['duplicates'] += 1
                     elif self.add_url(url, info.get('description', ''), info.get('severity', 'medium')):
-                        results['imported'] += 1
-                    else:
-                        results['failed'] += 1
-            
-            # Import process names
-            if 'process_names' in data:
-                for process, info in data['process_names'].items():
-                    if process in self.iocs['process_names']:
-                        results['duplicates'] += 1
-                    elif self.add_process_name(process, info.get('description', ''), info.get('severity', 'medium')):
                         results['imported'] += 1
                     else:
                         results['failed'] += 1

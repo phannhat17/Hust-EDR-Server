@@ -70,11 +70,47 @@ function Install-EDRStack {
         Write-Host "Executing EDR Agent installation script..."
         $output = & powershell.exe -ExecutionPolicy Bypass -File $edrScriptPath *>&1 | Tee-Object -FilePath $edrLogFile
         
-        # Extract the EDR Agent ID from the log
-        $edrAgentId = $output | Select-String -Pattern "Registered with server as agent ID: ([0-9a-f\-]+)" | ForEach-Object { $_.Matches.Groups[1].Value }
+        # First try to extract the agent ID directly from the logs
+        $edrAgentId = $output | Select-String -Pattern "Retrieved agent ID from test: ([0-9a-f\-]+)" | ForEach-Object { $_.Matches.Groups[1].Value }
+        
+        # If not found in output, check the config file which should contain the saved agent ID
+        if (-not $edrAgentId) {
+            $configFilePath = "C:\ProgramData\HustEDRAgent\config.yaml"
+            if (Test-Path $configFilePath) {
+                Write-Host "Checking agent config file for ID: $configFilePath" -ForegroundColor Yellow
+                
+                # Wait a bit longer to allow the service to register and update the config
+                Write-Host "Waiting for agent service to register with server..." -ForegroundColor Yellow
+                Start-Sleep -s 10
+                
+                # Read the config file again in case it was updated
+                $configContent = Get-Content -Path $configFilePath -Raw -ErrorAction SilentlyContinue
+                if ($configContent -match "agent_id:\s*""([^""]+)""" -and $matches[1] -ne "") {
+                    $edrAgentId = $matches[1]
+                    Write-Host "Found agent ID in config file: $edrAgentId" -ForegroundColor Green
+                } else {
+                    # If no agent ID in the config, check the log files
+                    $stdoutLogPath = "C:\ProgramData\HustEDRAgent\logs\edr-agent-stdout.log"
+                    if (Test-Path $stdoutLogPath) {
+                        Write-Host "Checking service log file: $stdoutLogPath" -ForegroundColor Yellow
+                        $logContent = Get-Content -Path $stdoutLogPath -ErrorAction SilentlyContinue
+                        $idMatch = $logContent | Select-String -Pattern "Registered with server as agent ID: ([0-9a-f\-]+)" | Select-Object -First 1
+                        if ($idMatch) {
+                            $edrAgentId = $idMatch.Matches.Groups[1].Value
+                            Write-Host "Found agent ID in service log: $edrAgentId" -ForegroundColor Green
+                        }
+                    }
+                }
+            }
+        }
+        
+        # If still not found, fall back to the legacy pattern in logs
+        if (-not $edrAgentId) {
+            $edrAgentId = $output | Select-String -Pattern "Registered with server as agent ID: ([0-9a-f\-]+)" | ForEach-Object { $_.Matches.Groups[1].Value }
+        }
         
         if (-not $edrAgentId) {
-            Write-Host "Could not extract EDR Agent ID from installation logs. Please check $edrLogFile" -ForegroundColor Yellow
+            Write-Host "Could not extract EDR Agent ID from any source. Please check $edrLogFile" -ForegroundColor Yellow
             return
         }
         

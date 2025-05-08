@@ -14,6 +14,7 @@ type Config struct {
 	LogFile       string `yaml:"log_file"`
 	DataDir       string `yaml:"data_dir"`
 	ScanInterval  int    `yaml:"scan_interval"`
+	Version       string `yaml:"version"`
 }
 
 // LoadConfig loads configuration from a YAML file
@@ -39,6 +40,9 @@ func LoadConfig(filename string) (*Config, error) {
 	}
 	if cfg.ScanInterval <= 0 {
 		cfg.ScanInterval = 30
+	}
+	if cfg.Version == "" {
+		cfg.Version = "1.0.0"
 	}
 
 	return &cfg, nil
