@@ -29,3 +29,9 @@ go.sum
 backend/data/*
 auto_response.log
 config.yaml
+
+.scannerwork/
+
+.sonar/
+
+sonar-project.properties
