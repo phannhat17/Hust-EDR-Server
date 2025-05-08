@@ -360,10 +360,9 @@ class EDRServicer(agent_pb2_grpc.EDRServiceServicer):
             self.active_streams[agent_id] = context
             loggers['conn'].debug(f"Registered command stream for agent {agent_id}")
         
-        # Flag to track if we've sent all pending commands
-        pending_sent = False
+        # Counter for IOC check throttling
         ioc_check_count = 0
-        
+
         # Function to check IOC status (to reduce code duplication)
         def check_and_queue_ioc_update():
             # Check if agent needs IOC update
@@ -421,45 +420,59 @@ class EDRServicer(agent_pb2_grpc.EDRServiceServicer):
                     last_status_update = current_time
                     loggers['debug'].debug(f"Updated agent {agent_id} status (throttled)")
                 
-                # Check for commands (only every 5th iteration, approx. every 2.5 seconds)
-                if check_counter % 5 == 0:
-                    # Throttled IOC check (only once every 30 seconds)
-                    if check_counter % 60 == 0:
-                        check_and_queue_ioc_update()
-                        
-                    # If we haven't sent pending commands, process them
-                    if not pending_sent:
-                        with self.stream_lock:
-                            # Get pending commands for this agent
-                            if agent_id in self.pending_commands and self.pending_commands[agent_id]:
-                                pending = self.pending_commands[agent_id]
-                                if pending:
-                                    loggers['debug'].info(f"Found {len(pending)} pending commands for agent {agent_id}")
-                                    for command in pending:
-                                        if command.timestamp > last_command_time:
-                                            # Add more detailed logging for command parameters
-                                            cmd_type_name = agent_pb2.CommandType.Name(command.type)
-                                            logger.info(f"Sending command {command.command_id} (Type: {cmd_type_name}) to agent {agent_id}")
-                                            
-                                            # Log detailed command parameters at debug level
-                                            loggers['debug'].info(f"Command details - ID: {command.command_id}, Type: {cmd_type_name}, Params: {command.params}")
-                                            
-                                            # For DELETE_FILE commands, specifically check the path
-                                            if command.type == agent_pb2.CommandType.DELETE_FILE:
-                                                if 'path' in command.params:
-                                                    loggers['debug'].info(f"DELETE_FILE command path parameter: {command.params['path']}")
-                                                else:
-                                                    logger.warning(f"DELETE_FILE command missing required 'path' parameter")
-                                                    
-                                            yield command
-                                            # Update last command time to avoid re-sending
-                                            last_command_time = max(last_command_time, command.timestamp)
-                                    # Clear pending commands after sending
-                                    self.pending_commands[agent_id] = []
-                                pending_sent = True
+                # Check for commands - reduced polling interval to be more responsive
+                # IMPORTANT: We always check for new commands, not only on certain iterations
+                # Remove the unused variable
+                # pending_sent = False
                 
-                # Sleep to avoid tight loop
-                time.sleep(0.5)
+                # Throttled IOC check (only once every 30 seconds)
+                if check_counter % 60 == 0:
+                    check_and_queue_ioc_update()
+                
+                # Always check for new commands
+                with self.stream_lock:
+                    # Get pending commands for this agent
+                    if agent_id in self.pending_commands and self.pending_commands[agent_id]:
+                        pending = self.pending_commands[agent_id]
+                        if pending:
+                            # Sort commands by timestamp descending to prioritize newer commands
+                            pending.sort(key=lambda cmd: cmd.timestamp, reverse=True)
+                            
+                            loggers['debug'].info(f"Found {len(pending)} pending commands for agent {agent_id}")
+                            
+                            # Track which commands were sent successfully
+                            sent_command_ids = []
+                            
+                            for command in pending:
+                                if command.timestamp > last_command_time:
+                                    # Add more detailed logging for command parameters
+                                    cmd_type_name = agent_pb2.CommandType.Name(command.type)
+                                    logger.info(f"Sending command {command.command_id} (Type: {cmd_type_name}) to agent {agent_id}")
+                                    
+                                    # Log detailed command parameters at debug level
+                                    loggers['debug'].info(f"Command details - ID: {command.command_id}, Type: {cmd_type_name}, Params: {command.params}")
+                                    
+                                    # For DELETE_FILE commands, specifically check the path
+                                    if command.type == agent_pb2.CommandType.DELETE_FILE:
+                                        if 'path' in command.params:
+                                            loggers['debug'].info(f"DELETE_FILE command path parameter: {command.params['path']}")
+                                        else:
+                                            logger.warning(f"DELETE_FILE command missing required 'path' parameter")
+                                                    
+                                    yield command
+                                    # Update last command time to avoid re-sending
+                                    last_command_time = max(last_command_time, command.timestamp)
+                                    # Track which command was sent
+                                    sent_command_ids.append(command.command_id)
+                            
+                            # Only remove commands that were sent, not all commands
+                            if sent_command_ids:
+                                # Keep commands that weren't sent
+                                self.pending_commands[agent_id] = [cmd for cmd in pending if cmd.command_id not in sent_command_ids]
+                                loggers['debug'].info(f"Removed {len(sent_command_ids)} sent commands from queue, {len(self.pending_commands[agent_id])} commands remain")
+                
+                # Sleep to avoid tight loop, but use shorter interval for more responsiveness
+                time.sleep(0.05)  # Reduced from 0.1 to 0.05 seconds for faster command delivery
                 
         except Exception as e:
             logger.warning(f"Command stream for agent {agent_id} ended: {e}")
@@ -503,6 +516,18 @@ class EDRServicer(agent_pb2_grpc.EDRServiceServicer):
             self.command_results[command_id] = result_dict
             self.save_command_results()
         
+        # Make sure command is removed from pending commands if it's still there
+        with self.stream_lock:
+            if agent_id in self.pending_commands:
+                # Filter out the command that just completed
+                original_count = len(self.pending_commands[agent_id])
+                self.pending_commands[agent_id] = [cmd for cmd in self.pending_commands[agent_id] 
+                                                if cmd.command_id != command_id]
+                new_count = len(self.pending_commands[agent_id])
+                
+                if original_count != new_count:
+                    loggers['debug'].debug(f"Removed completed command {command_id} from pending queue")
+        
         # If this was an IOC update command, update the agent's IOC version
         cmd_type = None
         for cmd in self.pending_commands.get(agent_id, []):
@@ -525,7 +550,7 @@ class EDRServicer(agent_pb2_grpc.EDRServiceServicer):
         )
     
     def SendCommand(self, request, context):
-        """Send a command to an agent."""
+        """Send a command to an agent synchronously and wait for results."""
         try:
             command = request.command
             agent_id = command.agent_id
@@ -547,28 +572,69 @@ class EDRServicer(agent_pb2_grpc.EDRServiceServicer):
                     logger.warning(error_msg)
                     return agent_pb2.SendCommandResponse(success=False, message=error_msg)
             
-            # Add command to pending commands for the agent
+            # Check if agent is online
+            current_time = int(time.time())
+            agent_online = (current_time - agent.get('last_seen', 0)) < 300  # 5 minutes
+            
+            if not agent_online:
+                return agent_pb2.SendCommandResponse(
+                    success=False, 
+                    message=f"Agent {agent_id} is offline. Cannot send command directly."
+                )
+            
+            # Check if agent has active stream
+            stream_active = False
+            with self.stream_lock:
+                stream_active = agent_id in self.active_streams and self.active_streams[agent_id] is not None
+            
+            if not stream_active:
+                return agent_pb2.SendCommandResponse(
+                    success=False, 
+                    message=f"Agent {agent_id} is online but has no active command stream. Cannot send command directly."
+                )
+            
+            # If we get here, agent is online with active stream
+            logger.info(f"Agent {agent_id} is online and has active stream - sending command directly")
+            
+            # Add command to pending commands queue
             with self.stream_lock:
                 if agent_id not in self.pending_commands:
                     self.pending_commands[agent_id] = []
-                
+                    
+                # Use millisecond precision timestamp for immediate processing
+                command.timestamp = int(time.time() * 1000)
                 self.pending_commands[agent_id].append(command)
-                
-                # Check agent status
-                current_time = int(time.time())
-                agent_online = (current_time - agent.get('last_seen', 0)) < 300  # 5 minutes
-                stream_active = agent_id in self.active_streams and self.active_streams[agent_id] is not None
-                
-                if stream_active:
-                    delivery_status = "Command will be delivered on next poll"
-                elif agent_online:
-                    delivery_status = "Agent is online but stream not found. Command queued for reconnect."
-                else:
-                    delivery_status = "Agent is offline. Command queued for later delivery."
-                
-                loggers['debug'].info(f"Agent {agent_id} status: {delivery_status}")
             
-            return agent_pb2.SendCommandResponse(success=True, message=f"Command queued: {delivery_status}")
+            # Wait for command to be executed with timeout
+            start_time = time.time()
+            timeout = 10  # seconds
+            while (time.time() - start_time) < timeout:
+                # Check if command result is available
+                with self.results_lock:
+                    if command.command_id in self.command_results:
+                        result = self.command_results[command.command_id]
+                        success = result.get('success', False)
+                        message = result.get('message', '')
+                        duration = result.get('duration_ms', 0)
+                        
+                        status = "succeeded" if success else "failed"
+                        response_msg = f"Command {status} in {duration}ms: {message}"
+                        logger.info(f"Command {command.command_id} completed: {response_msg}")
+                        
+                        return agent_pb2.SendCommandResponse(
+                            success=success,
+                            message=response_msg
+                        )
+                
+                # Still waiting for result
+                time.sleep(0.1)
+            
+            # If we get here, command timed out
+            logger.warning(f"Command {command.command_id} execution timed out after {timeout}s")
+            return agent_pb2.SendCommandResponse(
+                success=False,
+                message=f"Command execution timed out after {timeout} seconds. The agent may still be processing it."
+            )
             
         except Exception as e:
             logger.error(f"Error in SendCommand: {e}")
