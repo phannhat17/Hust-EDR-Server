@@ -65,10 +65,101 @@ export interface Agent {
    * Timestamp of last status update (milliseconds)
    */
   last_seen: string;
+  
+  /**
+   * Last IOC match information
+   */
+  last_ioc_match?: {
+    timestamp: number;
+    type: string;
+    ioc_value: string;
+    severity: string;
+  };
+  
+  /**
+   * IOC matches history
+   */
+  ioc_matches?: IOCMatch[];
 }
 
-export function isAgentOnline(lastSeen: string): boolean {
-  const lastSeenDate = new Date(lastSeen);
-  const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000); // 10 minutes in milliseconds
-  return lastSeenDate > tenMinutesAgo;
+/**
+ * Represents a severity level
+ */
+export type SeverityLevel = 'low' | 'medium' | 'high' | 'critical';
+
+/**
+ * Represents an IOC match
+ */
+export interface IOCMatch {
+  /**
+   * Unique report ID
+   */
+  report_id: string;
+  
+  /**
+   * Agent ID that reported the match
+   */
+  agent_id: string;
+  
+  /**
+   * Timestamp when the match occurred
+   */
+  timestamp: number;
+  
+  /**
+   * Type of IOC (IOC_IP, IOC_HASH, IOC_URL)
+   */
+  type: string;
+  
+  /**
+   * The IOC value that was matched
+   */
+  ioc_value: string;
+  
+  /**
+   * The actual value that matched
+   */
+  matched_value: string;
+  
+  /**
+   * Additional context about the match
+   */
+  context: string;
+  
+  /**
+   * Severity level
+   */
+  severity: SeverityLevel;
+  
+  /**
+   * Action taken in response to the match
+   */
+  action_taken: string | null;
+  
+  /**
+   * Whether the action was successful
+   */
+  action_success: boolean;
+  
+  /**
+   * Message from the action
+   */
+  action_message: string;
+  
+  /**
+   * When the server received the report
+   */
+  server_received: number;
+}
+
+/**
+ * Check if an agent is online (last seen within 5 minutes)
+ */
+export function isAgentOnline(lastSeen: string | number): boolean {
+  if (!lastSeen) return false;
+  
+  const lastSeenTime = typeof lastSeen === 'string' ? parseInt(lastSeen, 10) : lastSeen;
+  const now = Date.now();
+  // Consider online if seen in the last 5 minutes
+  return now - lastSeenTime < 5 * 60 * 1000;
 } 

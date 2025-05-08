@@ -77,9 +77,7 @@ A comprehensive Endpoint Detection and Response (EDR) system consisting of a ser
 
 1. Generate gRPC Code:
    ```bash
-   protoc --go_out=. --go_opt=paths=source_relative \
-       --go-grpc_out=. --go-grpc_opt=paths=source_relative \
-       proto/agent.proto
+   protoc --go_out=. --go_opt=paths=source_relative --go-grpc_out=. --go-grpc_opt=paths=source_relative proto/agent.proto
    ```
 
 2. Build the Agent:

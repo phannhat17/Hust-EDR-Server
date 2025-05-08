@@ -676,22 +676,13 @@ class EDRServicer(agent_pb2_grpc.EDRServiceServicer):
             )
             response.urls[url] = ioc_data
         
-        # Add process names
-        for process, info in iocs['process_names'].items():
-            ioc_data = agent_pb2.IOCData(
-                value=process,
-                description=info.get('description', ''),
-                severity=info.get('severity', 'medium')
-            )
-            response.process_names[process] = ioc_data
+        # Process names are no longer included
         
-        logger.info(f"Sending IOC update to agent {agent_id}: {len(response.ip_addresses)} IPs, " +
-                   f"{len(response.file_hashes)} hashes, {len(response.urls)} URLs, " +
-                   f"{len(response.process_names)} processes")
-        
-        # Update agent's IOC version
+        # Update agent in storage with new IOC version
         agent['ioc_version'] = server_version
         self.storage.save_agent(agent_id, agent)
+        
+        logger.info(f"Sent IOC update to agent {agent_id}: version {server_version}, {len(response.ip_addresses)} IPs, {len(response.file_hashes)} hashes, {len(response.urls)} URLs")
         
         return response
     
@@ -756,17 +747,10 @@ class EDRServicer(agent_pb2_grpc.EDRServiceServicer):
         
         # For high severity IOCs that didn't have an action, suggest one
         if severity == 'high' and action_taken == agent_pb2.CommandType.UNKNOWN:
-            if ioc_type == agent_pb2.IOCType.IOC_PROCESS:
-                # Suggest killing the process
-                perform_additional_action = True
-                additional_action = agent_pb2.CommandType.KILL_PROCESS
-                # We don't have the PID here, so agent will need to find it
-                action_params = {'process_name': matched_value}
-            elif ioc_type == agent_pb2.IOCType.IOC_IP:
-                # Suggest blocking the IP
-                perform_additional_action = True
-                additional_action = agent_pb2.CommandType.BLOCK_IP
-                action_params = {'ip': matched_value}
+            # IP blocking is now handled automatically by the agent
+            if ioc_type == agent_pb2.IOCType.IOC_HASH:
+                # For file hash matches, we could suggest additional actions if needed
+                pass
         
         return agent_pb2.IOCMatchAck(
             report_id=report_id,

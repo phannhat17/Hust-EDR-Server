@@ -210,6 +210,11 @@ export const agentsApi = {
   registerAgent: async (agentData: any) => {
     const response = await api.post('/api/agents/register', agentData)
     return response.data
+  },
+  
+  getAgentIOCMatches: async (agentId: string) => {
+    const response = await api.get(`/api/agents/${agentId}/ioc-matches`)
+    return response.data
   }
 }
 

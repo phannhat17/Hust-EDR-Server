@@ -71,7 +71,7 @@ function Install-EDRStack {
         $output = & powershell.exe -ExecutionPolicy Bypass -File $edrScriptPath *>&1 | Tee-Object -FilePath $edrLogFile
         
         # Extract the EDR Agent ID from the log
-        $edrAgentId = $output | Select-String -Pattern "Registering agent ([0-9a-f\-]+) with server" | ForEach-Object { $_.Matches.Groups[1].Value }
+        $edrAgentId = $output | Select-String -Pattern "Registered with server as agent ID: ([0-9a-f\-]+)" | ForEach-Object { $_.Matches.Groups[1].Value }
         
         if (-not $edrAgentId) {
             Write-Host "Could not extract EDR Agent ID from installation logs. Please check $edrLogFile" -ForegroundColor Yellow

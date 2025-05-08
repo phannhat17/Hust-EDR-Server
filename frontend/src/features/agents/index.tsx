@@ -12,7 +12,7 @@ import { Header } from '@/components/layout/header'
 import { Main } from '@/components/layout/main'
 import { TopNav } from '@/components/layout/top-nav'
 import { agentsApi } from '@/lib/api'
-import { Agent } from '@/lib/types'
+import { Agent, IOCMatch, SeverityLevel } from '@/types/agent'
 import {
   Table,
   TableBody,
@@ -26,7 +26,7 @@ import { Search } from '@/components/search'
 import { ThemeSwitch } from '@/components/theme-switch'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 import { useState } from 'react'
-import { DotsHorizontalIcon } from '@radix-ui/react-icons'
+import { Loader, MoreHorizontal } from "lucide-react"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -34,6 +34,23 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { isAgentOnline } from '@/types/agent'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+
+// Add this function to get severity badge
+function getSeverityBadge(severity: SeverityLevel | string) {
+  switch (severity) {
+    case 'critical':
+      return <Badge variant="destructive">Critical</Badge>
+    case 'high':
+      return <Badge variant="destructive">High</Badge>
+    case 'medium':
+      return <Badge variant="secondary">Medium</Badge>
+    case 'low':
+      return <Badge variant="outline">Low</Badge>
+    default:
+      return <Badge variant="outline">{severity}</Badge>
+  }
+}
 
 export default function Agents() {
   const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null)
@@ -43,6 +60,13 @@ export default function Agents() {
     queryKey: ['agents'],
     queryFn: () => agentsApi.getAgents(),
     refetchInterval: 60000, // Refresh every minute
+  });
+  
+  // Add query for IOC match history when an agent is selected
+  const { data: iocMatches = [], isLoading: isLoadingIOCMatches } = useQuery({
+    queryKey: ['agent-ioc-matches', selectedAgent?.id],
+    queryFn: () => selectedAgent ? agentsApi.getAgentIOCMatches(selectedAgent.id) : Promise.resolve([]),
+    enabled: !!selectedAgent,
   });
 
   return (
@@ -98,11 +122,11 @@ export default function Agents() {
                     <TableRow key={agent.id}>
                       <TableCell className="font-medium">{agent.hostname}</TableCell>
                       <TableCell>{agent.ip_address}</TableCell>
-                      <TableCell>{agent.os_info}</TableCell>
+                      <TableCell>{agent.os}</TableCell>
                       <TableCell>{agent.version}</TableCell>
                       <TableCell>
-                        <Badge variant={agent.status === 'ONLINE' ? "green" : "black"}>
-                          {agent.status}
+                        <Badge variant={isAgentOnline(agent.last_seen) ? "green" : "black"}>
+                          {isAgentOnline(agent.last_seen) ? "ONLINE" : "OFFLINE"}
                         </Badge>
                       </TableCell>
                       <TableCell>{new Date(agent.last_seen).toLocaleString()}</TableCell>
@@ -113,7 +137,7 @@ export default function Agents() {
                               variant="ghost"
                               className="h-8 w-8 p-0"
                             >
-                              <DotsHorizontalIcon className="h-4 w-4" />
+                              <MoreHorizontal className="h-4 w-4" />
                               <span className="sr-only">Show options</span>
                             </Button>
                           </DropdownMenuTrigger>
@@ -151,7 +175,7 @@ export default function Agents() {
                               Details
                             </Button>
                           </DialogTrigger>
-                          <DialogContent className="sm:max-w-[600px]">
+                          <DialogContent className="sm:max-w-[800px] max-h-[90vh] overflow-y-auto">
                             <DialogHeader>
                               <DialogTitle className="flex items-center gap-2 text-xl">
                                 Agent Details
@@ -164,75 +188,141 @@ export default function Agents() {
                             </DialogHeader>
                             {selectedAgent && (
                               <div className="mt-4 space-y-6">
-                                {/* Basic Information */}
-                                <div className="rounded-lg border p-4">
-                                  <h3 className="mb-3 text-sm font-medium text-muted-foreground">Basic Information</h3>
-                                  <div className="grid grid-cols-2 gap-4">
-                                    <div>
-                                      <h4 className="text-sm font-semibold">Hostname</h4>
-                                      <p className="text-sm">{selectedAgent.hostname}</p>
-                                    </div>
-                                    <div>
-                                      <h4 className="text-sm font-semibold">IP Address</h4>
-                                      <p className="text-sm">{selectedAgent.ip_address}</p>
-                                    </div>
-                                    <div>
-                                      <h4 className="text-sm font-semibold">MAC Address</h4>
-                                      <p className="text-sm">{selectedAgent.mac_address || 'Not available'}</p>
-                                    </div>
-                                    <div>
-                                      <h4 className="text-sm font-semibold">Username</h4>
-                                      <p className="text-sm">{selectedAgent.username || 'Not available'}</p>
-                                    </div>
-                                  </div>
-                                </div>
+                                <Tabs defaultValue="info">
+                                  <TabsList className="grid w-full grid-cols-2">
+                                    <TabsTrigger value="info">Agent Information</TabsTrigger>
+                                    <TabsTrigger value="ioc-history">IOC Response History</TabsTrigger>
+                                  </TabsList>
 
-                                {/* System Information */}
-                                <div className="rounded-lg border p-4">
-                                  <h3 className="mb-3 text-sm font-medium text-muted-foreground">System Information</h3>
-                                  <div className="mb-4">
-                                    <h4 className="text-sm font-semibold">Operating System</h4>
-                                    <p className="text-sm">{selectedAgent.os_version_full}</p>
-                                  </div>
-                                  
-                                  <div className="grid grid-cols-3 gap-4">
-                                    <div className="rounded-md bg-muted p-3">
-                                      <h4 className="text-xs font-semibold text-muted-foreground">CPU Usage</h4>
-                                      <p className="text-lg font-medium">{selectedAgent.cpu_usage !== undefined ? `${selectedAgent.cpu_usage.toFixed(1)}%` : 'N/A'}</p>
+                                  <TabsContent value="info" className="space-y-6">
+                                    {/* Basic Information */}
+                                    <div className="rounded-lg border p-4">
+                                      <h3 className="mb-3 text-sm font-medium text-muted-foreground">Basic Information</h3>
+                                      <div className="grid grid-cols-2 gap-4">
+                                        <div>
+                                          <h4 className="text-sm font-semibold">Hostname</h4>
+                                          <p className="text-sm">{selectedAgent.hostname}</p>
+                                        </div>
+                                        <div>
+                                          <h4 className="text-sm font-semibold">IP Address</h4>
+                                          <p className="text-sm">{selectedAgent.ip_address}</p>
+                                        </div>
+                                        <div>
+                                          <h4 className="text-sm font-semibold">MAC Address</h4>
+                                          <p className="text-sm">{selectedAgent.mac_address || 'Not available'}</p>
+                                        </div>
+                                        <div>
+                                          <h4 className="text-sm font-semibold">Username</h4>
+                                          <p className="text-sm">{selectedAgent.username || 'Not available'}</p>
+                                        </div>
+                                      </div>
                                     </div>
-                                    <div className="rounded-md bg-muted p-3">
-                                      <h4 className="text-xs font-semibold text-muted-foreground">Memory Usage</h4>
-                                      <p className="text-lg font-medium">{selectedAgent.memory_usage !== undefined ? `${selectedAgent.memory_usage.toFixed(1)}%` : 'N/A'}</p>
-                                    </div>
-                                    <div className="rounded-md bg-muted p-3">
-                                      <h4 className="text-xs font-semibold text-muted-foreground">Uptime</h4>
-                                      <p className="text-lg font-medium">
-                                        {selectedAgent.uptime !== undefined 
-                                          ? formatUptime(selectedAgent.uptime) 
-                                          : 'N/A'}
-                                      </p>
-                                    </div>
-                                  </div>
-                                </div>
 
-                                {/* Agent Status */}
-                                <div className="rounded-lg border p-4">
-                                  <h3 className="mb-3 text-sm font-medium text-muted-foreground">Agent Status</h3>
-                                  <div className="grid grid-cols-3 gap-4">
-                                    <div>
-                                      <h4 className="text-sm font-semibold">Agent Version</h4>
-                                      <p className="text-sm">{selectedAgent.version}</p>
+                                    {/* System Information */}
+                                    <div className="rounded-lg border p-4">
+                                      <h3 className="mb-3 text-sm font-medium text-muted-foreground">System Information</h3>
+                                      <div className="grid grid-cols-2 gap-4">
+                                        <div>
+                                          <h4 className="text-sm font-semibold">Operating System</h4>
+                                          <p className="text-sm">{selectedAgent.os}</p>
+                                        </div>
+                                        <div>
+                                          <h4 className="text-sm font-semibold">CPU Usage</h4>
+                                          <p className="text-sm">{selectedAgent.cpu_usage !== undefined ? `${selectedAgent.cpu_usage.toFixed(1)}%` : 'N/A'}</p>
+                                        </div>
+                                        <div>
+                                          <h4 className="text-sm font-semibold">Memory Usage</h4>
+                                          <p className="text-sm">{selectedAgent.memory_usage !== undefined ? `${selectedAgent.memory_usage.toFixed(1)}%` : 'N/A'}</p>
+                                        </div>
+                                        <div>
+                                          <h4 className="text-sm font-semibold">Uptime</h4>
+                                          <p className="text-sm">{selectedAgent.uptime !== undefined 
+                                            ? formatUptime(selectedAgent.uptime) 
+                                            : 'N/A'}</p>
+                                        </div>
+                                      </div>
                                     </div>
-                                    <div>
-                                      <h4 className="text-sm font-semibold">Registered</h4>
-                                      <p className="text-sm">{new Date(selectedAgent.registered_at).toLocaleString()}</p>
+
+                                    {/* Agent Status */}
+                                    <div className="rounded-lg border p-4">
+                                      <h3 className="mb-3 text-sm font-medium text-muted-foreground">Agent Status</h3>
+                                      <div className="grid grid-cols-3 gap-4">
+                                        <div>
+                                          <h4 className="text-sm font-semibold">Agent Version</h4>
+                                          <p className="text-sm">{selectedAgent.version}</p>
+                                        </div>
+                                        <div>
+                                          <h4 className="text-sm font-semibold">Registered</h4>
+                                          <p className="text-sm">{new Date(selectedAgent.registered_at).toLocaleString()}</p>
+                                        </div>
+                                        <div>
+                                          <h4 className="text-sm font-semibold">Last Seen</h4>
+                                          <p className="text-sm">{new Date(selectedAgent.last_seen).toLocaleString()}</p>
+                                        </div>
+                                      </div>
                                     </div>
-                                    <div>
-                                      <h4 className="text-sm font-semibold">Last Seen</h4>
-                                      <p className="text-sm">{new Date(selectedAgent.last_seen).toLocaleString()}</p>
+                                  </TabsContent>
+
+                                  <TabsContent value="ioc-history">
+                                    <div className="rounded-lg border p-4">
+                                      <h3 className="mb-3 text-sm font-medium">IOC Response History</h3>
+                                      
+                                      {isLoadingIOCMatches ? (
+                                        <div className="flex justify-center py-8">
+                                          <Loader className="h-8 w-8 animate-spin" />
+                                          <span className="ml-2">Loading IOC history...</span>
+                                        </div>
+                                      ) : iocMatches.length === 0 ? (
+                                        <div className="text-center py-8 text-muted-foreground">
+                                          No IOC matches recorded for this agent
+                                        </div>
+                                      ) : (
+                                        <Table>
+                                          <TableHeader>
+                                            <TableRow>
+                                              <TableHead>Time</TableHead>
+                                              <TableHead>IOC Type</TableHead>
+                                              <TableHead>Matched Value</TableHead>
+                                              <TableHead>Severity</TableHead>
+                                              <TableHead>Action Taken</TableHead>
+                                              <TableHead>Result</TableHead>
+                                            </TableRow>
+                                          </TableHeader>
+                                          <TableBody>
+                                            {iocMatches.map((match: IOCMatch) => (
+                                              <TableRow key={match.report_id}>
+                                                <TableCell>{new Date(match.timestamp * 1000).toLocaleString()}</TableCell>
+                                                <TableCell>
+                                                  {match.type === 'IOC_IP' ? 'IP Address' : 
+                                                   match.type === 'IOC_HASH' ? 'File Hash' : 
+                                                   match.type === 'IOC_URL' ? 'URL' : match.type}
+                                                </TableCell>
+                                                <TableCell className="font-mono text-xs">
+                                                  {match.matched_value}
+                                                </TableCell>
+                                                <TableCell>{getSeverityBadge(match.severity)}</TableCell>
+                                                <TableCell>
+                                                  {match.action_taken ? formatActionName(match.action_taken) : 'None'}
+                                                </TableCell>
+                                                <TableCell>
+                                                  {match.action_taken ? (
+                                                    match.action_success ? (
+                                                      <Badge variant="green">Success</Badge>
+                                                    ) : (
+                                                      <Badge variant="destructive">Failed</Badge>
+                                                    )
+                                                  ) : (
+                                                    'N/A'
+                                                  )}
+                                                </TableCell>
+                                              </TableRow>
+                                            ))}
+                                          </TableBody>
+                                        </Table>
+                                      )}
                                     </div>
-                                  </div>
-                                </div>
+                                  </TabsContent>
+                                </Tabs>
                                 
                                 {/* Quick Actions */}
                                 <div className="flex justify-end gap-2">
@@ -259,40 +349,47 @@ export default function Agents() {
   )
 }
 
-// Helper function to format uptime in a human-readable format
+// Helper function to format uptime
 function formatUptime(seconds: number): string {
-  if (seconds < 60) {
-    return `${seconds} seconds`;
-  } else if (seconds < 3600) {
-    return `${Math.floor(seconds / 60)} minutes`;
-  } else if (seconds < 86400) { // less than a day
-    const hours = Math.floor(seconds / 3600);
-    const minutes = Math.floor((seconds % 3600) / 60);
-    return `${hours} ${hours === 1 ? 'hour' : 'hours'} ${minutes} ${minutes === 1 ? 'minute' : 'minutes'}`;
+  const days = Math.floor(seconds / 86400);
+  const hours = Math.floor((seconds % 86400) / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  
+  if (days > 0) {
+    return `${days}d ${hours}h ${minutes}m`;
+  } else if (hours > 0) {
+    return `${hours}h ${minutes}m`;
   } else {
-    const days = Math.floor(seconds / 86400);
-    const hours = Math.floor((seconds % 86400) / 3600);
-    return `${days} ${days === 1 ? 'day' : 'days'} ${hours} ${hours === 1 ? 'hour' : 'hours'}`;
+    return `${minutes}m`;
+  }
+}
+
+// Helper function to format action names
+function formatActionName(action: string): string {
+  switch (action) {
+    case 'DELETE_FILE':
+      return 'Delete File';
+    case 'KILL_PROCESS':
+      return 'Kill Process';
+    case 'KILL_PROCESS_TREE':
+      return 'Kill Process Tree';
+    case 'BLOCK_IP':
+      return 'Block IP';
+    case 'BLOCK_URL':
+      return 'Block URL';
+    case 'NETWORK_ISOLATE':
+      return 'Network Isolation';
+    case 'NETWORK_RESTORE':
+      return 'Network Restore';
+    default:
+      return action;
   }
 }
 
 const topNav = [
-  {
-    title: 'All Agents',
-    href: '/agents',
-    isActive: true,
-    disabled: false,
-  },
-  {
-    title: 'Active',
-    href: '/agents?status=active',
-    isActive: false,
-    disabled: true,
-  },
-  {
-    title: 'Inactive',
-    href: '/agents?status=inactive',
-    isActive: false,
-    disabled: true,
-  },
+  { title: 'Dashboard', href: '/', isActive: false },
+  { title: 'Agents', href: '/agents', isActive: true },
+  { title: 'Alerts', href: '/alerts', isActive: false },
+  { title: 'Commands', href: '/commands', isActive: false },
+  { title: 'IOCs', href: '/iocs', isActive: false },
 ] 

@@ -6,272 +6,166 @@ import (
 	"log"
 	"os"
 	"os/signal"
-	"sync"
 	"syscall"
 	"time"
 
 	"agent/client"
-	"agent/collector"
 	"agent/config"
-	pb "agent/proto"
+	"agent/ioc"
 )
 
+// Command-line arguments
 var (
-	serverAddr = flag.String("server", "", "The server address in the format of host:port")
-	interval   = flag.Int("interval", 0, "Status update interval in seconds")
+	serverAddr  = flag.String("server", "localhost:50051", "Server address")
+	configFile  = flag.String("config", "config.yaml", "Configuration file")
+	logFile     = flag.String("log", "", "Log file (default: stdout)")
+	agentID     = flag.String("id", "", "Agent ID (generated if empty)")
+	dataDir     = flag.String("data", "data", "Data directory")
+	scanMinutes = flag.Int("scan-interval", 30, "IOC scan interval in minutes")
 )
 
 func main() {
+	// Parse command-line flags
 	flag.Parse()
 
-	// Initialize configuration
-	cfg := config.DefaultConfig()
-
-	// Override defaults with command line flags if provided
-	if *serverAddr != "" {
-		cfg.ServerAddress = *serverAddr
-	}
-	if *interval > 0 {
-		cfg.UpdateInterval = time.Duration(*interval) * time.Second
+	// Setup data directory
+	if err := os.MkdirAll(*dataDir, 0755); err != nil {
+		log.Fatalf("Failed to create data directory: %v", err)
 	}
 
-	// Initialize system information collector
-	sysCollector := collector.NewSystemCollector()
-	
-	// Initialize gRPC client
-	edrClient, err := client.NewClient(cfg)
+	// Setup logging
+	if *logFile != "" {
+		f, err := os.OpenFile(*logFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		if err != nil {
+			log.Fatalf("Failed to open log file: %v", err)
+		}
+		defer f.Close()
+		log.SetOutput(f)
+	}
+
+	// Load configuration file
+	cfg, err := config.LoadConfig(*configFile)
 	if err != nil {
-		log.Fatalf("Failed to create client: %v", err)
+		if !os.IsNotExist(err) {
+			log.Printf("Error loading config file: %v", err)
+		}
+		// Use default config or command-line values if file not found
+		cfg = &config.Config{
+			ServerAddress: *serverAddr,
+			AgentID:       *agentID,
+			LogFile:       *logFile,
+			DataDir:       *dataDir,
+		}
+		log.Printf("Using default configuration")
+	} else {
+		log.Printf("Loaded configuration from %s", *configFile)
+		
+		// Override config with command-line flags if provided
+		if *serverAddr != "localhost:50051" {
+			cfg.ServerAddress = *serverAddr
+		}
+		if *agentID != "" {
+			cfg.AgentID = *agentID
+		}
+		if *logFile != "" {
+			cfg.LogFile = *logFile
+		}
+		if *dataDir != "data" {
+			cfg.DataDir = *dataDir
+		}
 	}
 
-	// Collect initial system information
-	info, err := sysCollector.CollectAgentInfo()
+	// Create and start the EDR client
+	edrClient, err := client.NewEDRClient(cfg.ServerAddress, cfg.AgentID)
 	if err != nil {
-		log.Fatalf("Failed to collect system information: %v", err)
+		log.Fatalf("Failed to create EDR client: %v", err)
 	}
 
-	// Register agent with server
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	// Start agent connection
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	
-	response, err := edrClient.RegisterAgent(ctx, info)
+
+	// Register with server
+	agentInfo, err := edrClient.Register(ctx)
 	if err != nil {
-		log.Fatalf("Failed to register agent: %v", err)
-	}
-	
-	log.Printf("Agent registered successfully. Server message: %s", response.ServerMessage)
-	
-	// If server assigned a different ID, update our agent ID
-	if response.AssignedId != "" && response.AssignedId != info.AgentId {
-		log.Printf("Server assigned new agent ID: %s", response.AssignedId)
-		info.AgentId = response.AssignedId
+		log.Fatalf("Failed to register with server: %v", err)
 	}
 
-	// Initialize command handler
-	cmdHandler := client.NewCommandHandler(edrClient)
+	log.Printf("Registered with server as agent ID: %s", agentInfo.AgentID)
+	// If agent ID was newly assigned, save to config
+	if cfg.AgentID == "" || cfg.AgentID != agentInfo.AgentID {
+		cfg.AgentID = agentInfo.AgentID
+		if err := config.SaveConfig(*configFile, cfg); err != nil {
+			log.Printf("Failed to save updated config: %v", err)
+		} else {
+			log.Printf("Updated configuration with assigned agent ID")
+		}
+	}
 
-	// Start periodic status updates in a separate goroutine
-	var wg sync.WaitGroup
-	wg.Add(2)  // One for status updates, one for command handling
+	// Start command stream
+	go edrClient.StartCommandStream(ctx)
+
+	// Start status reporting
+	go startStatusReporting(ctx, edrClient)
+	
+	// Get command handler to access IOC functionality
+	commandHandler := edrClient.GetCommandHandler()
+	
+	// Configure and start IOC scanner
+	scanner := ioc.NewScanner(
+		commandHandler.GetIOCManager(),
+		commandHandler.ReportIOCMatch,
+		*scanMinutes,
+	)
+	
+	// Start IOC scanning
+	scanner.Start()
+	
+	log.Printf("EDR agent started (ID: %s, Server: %s)", agentInfo.AgentID, cfg.ServerAddress)
+	log.Printf("IOC scanner started with %d minute interval", *scanMinutes)
 
 	// Handle graceful shutdown
-	shutdown := make(chan os.Signal, 1)
-	signal.Notify(shutdown, syscall.SIGINT, syscall.SIGTERM)
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	<-sigChan
+
+	log.Printf("Shutting down agent...")
 	
-	// Channel to communicate shutdown to goroutines
-	done := make(chan struct{})
-
-	// Start status update goroutine
-	go func() {
-		defer wg.Done()
-		statusUpdater(edrClient, sysCollector, info.AgentId, cfg.UpdateInterval, done)
-	}()
-
-	// Start command handling goroutine
-	go func() {
-		defer wg.Done()
-		commandHandler(edrClient, cmdHandler, info.AgentId, done)
-	}()
-
-	// Wait for shutdown signal
-	<-shutdown
-	log.Println("Shutting down agent...")
+	// Stop the IOC scanner
+	scanner.Stop()
 	
-	// Signal goroutines to shut down
-	close(done)
-
-	// Wait for goroutines to complete
-	wg.Wait()
+	// Cancel context to stop other goroutines
+	cancel()
 	
-	log.Println("Agent shutdown complete")
+	// Allow time for cleanup
+	time.Sleep(500 * time.Millisecond)
+	log.Printf("Agent shutdown complete")
 }
 
-// statusUpdater periodically sends status updates to the server
-func statusUpdater(client *client.EDRClient, collector *collector.SystemCollector, agentID string, interval time.Duration, done <-chan struct{}) {
-	ticker := time.NewTicker(interval)
+// startStatusReporting periodically sends status updates to the server
+func startStatusReporting(ctx context.Context, edrClient *client.EDRClient) {
+	ticker := time.NewTicker(1 * time.Minute)
 	defer ticker.Stop()
 
 	for {
 		select {
 		case <-ticker.C:
-			// Collect current status
-			status, err := collector.CollectAgentStatus(agentID)
-			if err != nil {
-				log.Printf("Error collecting status: %v", err)
-				continue
-			}
-
-			// Send status update
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			statusResp, err := client.UpdateStatus(ctx, status)
-			cancel()
-			
-			if err != nil {
+			metrics := collectSystemMetrics()
+			if err := edrClient.UpdateStatus(ctx, "RUNNING", metrics); err != nil {
 				log.Printf("Failed to send status update: %v", err)
-			} else {
-				log.Printf("Status update sent. Acknowledged: %v", statusResp.Acknowledged)
 			}
-
-		case <-done:
-			log.Println("Status updater shutting down")
+		case <-ctx.Done():
 			return
 		}
 	}
 }
 
-// commandHandler listens for commands from the server and executes them
-func commandHandler(client *client.EDRClient, handler *client.CommandHandler, agentID string, done <-chan struct{}) {
-	log.Println("Starting command handler")
-	
-	// Track last command time to avoid reprocessing commands
-	var lastCommandTime int64 = 0
-	
-	// Backoff for reconnections
-	backoff := time.Millisecond * 100
-	maxBackoff := 30 * time.Second
-	
-	for {
-		select {
-		case <-done:
-			log.Println("Command handler shutting down")
-			return
-		default:
-			// Create a background context with cancel for the stream
-			ctx, cancel := context.WithCancel(context.Background())
-			
-			// Set up a goroutine to cancel the context when done
-			streamDone := make(chan struct{})
-			go func() {
-				select {
-				case <-done:
-					cancel()
-				case <-streamDone:
-					// Stream is already done
-				}
-			}()
-			
-			// Establish command stream
-			stream, err := client.ReceiveCommands(ctx, agentID, lastCommandTime)
-			if err != nil {
-				log.Printf("Failed to establish command stream: %v. Retrying in %v...", err, backoff)
-				cancel()
-				close(streamDone)
-				select {
-				case <-time.After(backoff):
-					// Exponential backoff with jitter
-					backoff = time.Duration(float64(backoff) * 1.5)
-					if backoff > maxBackoff {
-						backoff = maxBackoff
-					}
-				case <-done:
-					return
-				}
-				continue
-			}
-			
-			// Reset backoff on successful connection
-			backoff = time.Millisecond * 100
-			
-			log.Printf("Command stream established, listening for commands...")
-			
-			// Process command stream
-			streamActive := true
-			for streamActive {
-				select {
-				case <-done:
-					cancel()
-					close(streamDone)
-					return
-				default:
-					// Receive next command with a timeout
-					recvDone := make(chan struct{})
-					var cmd *pb.Command
-					var recvErr error
-					
-					go func() {
-						cmd, recvErr = stream.Recv()
-						close(recvDone)
-					}()
-					
-					select {
-					case <-recvDone:
-						if recvErr != nil {
-							log.Printf("Command stream error: %v. Reconnecting...", recvErr)
-							cancel()
-							close(streamDone)
-							streamActive = false
-							break
-						}
-						
-						// Print detailed debug info about received command
-						log.Printf("DEBUG: Received command - ID: %s, Type: %s, Timestamp: %d", 
-							cmd.CommandId, cmd.Type.String(), cmd.Timestamp)
-						log.Printf("DEBUG: Command params: %+v", cmd.Params)
-						
-						// Process command if newer than last one
-						if cmd.Timestamp > lastCommandTime {
-							log.Printf("Received command: %s (Type: %s)", cmd.CommandId, cmd.Type.String())
-							
-							// Update last command time
-							lastCommandTime = cmd.Timestamp
-							
-							// Handle command asynchronously
-							go func(command *pb.Command) {
-								// Create context with timeout for command execution
-								cmdCtx, cmdCancel := context.WithTimeout(context.Background(), 
-									time.Duration(command.Timeout)*time.Second)
-								defer cmdCancel()
-								
-								log.Printf("DEBUG: Executing command with timeout: %d seconds", command.Timeout)
-								
-								// Process command
-								result := handler.HandleCommand(cmdCtx, command)
-								
-								log.Printf("DEBUG: Command executed, success: %v, message: %s", 
-									result.Success, result.Message)
-								
-								// Report result back to server
-								reportCtx, reportCancel := context.WithTimeout(context.Background(), 5*time.Second)
-								_, err := client.ReportCommandResult(reportCtx, result)
-								reportCancel()
-								
-								if err != nil {
-									log.Printf("Failed to report command result: %v", err)
-								} else {
-									log.Printf("Command result for %s reported successfully", command.CommandId)
-								}
-							}(cmd)
-						} else {
-							log.Printf("Ignoring old command: %s (Timestamp: %d, Last: %d)",
-								cmd.CommandId, cmd.Timestamp, lastCommandTime)
-						}
-					case <-done:
-						cancel()
-						close(streamDone)
-						return
-					}
-				}
-			}
-		}
+// collectSystemMetrics collects system metrics
+func collectSystemMetrics() map[string]float64 {
+	// This is a simple placeholder - a real implementation would collect actual metrics
+	return map[string]float64{
+		"cpu_usage":    0.5,  // 50% CPU usage (placeholder)
+		"memory_usage": 0.25, // 25% memory usage (placeholder)
+		"uptime":       3600, // 1 hour uptime (placeholder)
 	}
 } 

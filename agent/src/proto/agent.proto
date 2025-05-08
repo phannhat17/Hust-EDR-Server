@@ -50,7 +50,6 @@ enum IOCType {
   IOC_IP = 1;
   IOC_HASH = 2;
   IOC_URL = 3;
-  IOC_PROCESS = 4;
 }
 
 // Agent registration request
@@ -185,7 +184,6 @@ message IOCResponse {
   map<string, IOCData> ip_addresses = 4;
   map<string, IOCData> file_hashes = 5;
   map<string, IOCData> urls = 6;
-  map<string, IOCData> process_names = 7;
 }
 
 // New: IOC match report from agent
