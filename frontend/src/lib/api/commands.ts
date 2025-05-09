@@ -27,12 +27,6 @@ export interface SendCommandParams {
   timeout?: number;
 }
 
-export interface SendCommandResponse {
-  success: boolean;
-  command_id?: string;
-  message: string;
-}
-
 export const commandsApi = {
   // Get all commands
   getCommands: async (): Promise<Command[]> => {
@@ -47,13 +41,13 @@ export const commandsApi = {
   },
 
   // Send a command to an agent
-  sendCommand: async (params: SendCommandParams): Promise<SendCommandResponse> => {
+  sendCommand: async (params: SendCommandParams) => {
     const response = await apiClient.post('/api/commands/send', params);
     return response.data;
   },
 
   // Helper functions for specific command types
-  deleteFile: async (agentId: string, filePath: string): Promise<SendCommandResponse> => {
+  deleteFile: async (agentId: string, filePath: string) => {
     return commandsApi.sendCommand({
       agent_id: agentId,
       type: 'DELETE_FILE',
@@ -61,7 +55,7 @@ export const commandsApi = {
     });
   },
 
-  killProcess: async (agentId: string, pid: string): Promise<SendCommandResponse> => {
+  killProcess: async (agentId: string, pid: string) => {
     return commandsApi.sendCommand({
       agent_id: agentId,
       type: 'KILL_PROCESS',
@@ -69,7 +63,7 @@ export const commandsApi = {
     });
   },
 
-  killProcessTree: async (agentId: string, pid: string): Promise<SendCommandResponse> => {
+  killProcessTree: async (agentId: string, pid: string) => {
     return commandsApi.sendCommand({
       agent_id: agentId,
       type: 'KILL_PROCESS_TREE',
@@ -77,7 +71,7 @@ export const commandsApi = {
     });
   },
 
-  blockIp: async (agentId: string, ip: string): Promise<SendCommandResponse> => {
+  blockIp: async (agentId: string, ip: string) => {
     return commandsApi.sendCommand({
       agent_id: agentId,
       type: 'BLOCK_IP',
@@ -85,7 +79,7 @@ export const commandsApi = {
     });
   },
 
-  blockUrl: async (agentId: string, url: string): Promise<SendCommandResponse> => {
+  blockUrl: async (agentId: string, url: string) => {
     return commandsApi.sendCommand({
       agent_id: agentId,
       type: 'BLOCK_URL',
@@ -93,7 +87,7 @@ export const commandsApi = {
     });
   },
 
-  isolateNetwork: async (agentId: string, allowedIps?: string): Promise<SendCommandResponse> => {
+  isolateNetwork: async (agentId: string, allowedIps?: string) => {
     return commandsApi.sendCommand({
       agent_id: agentId,
       type: 'NETWORK_ISOLATE',
@@ -101,7 +95,7 @@ export const commandsApi = {
     });
   },
 
-  restoreNetwork: async (agentId: string): Promise<SendCommandResponse> => {
+  restoreNetwork: async (agentId: string) => {
     return commandsApi.sendCommand({
       agent_id: agentId,
       type: 'NETWORK_RESTORE',
