@@ -14,8 +14,7 @@ import {
   TableRow 
 } from '@/components/ui/table'
 import { Badge } from '@/components/ui/badge'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Search } from '@/components/search'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ThemeSwitch } from '@/components/theme-switch'
 import { Header } from '@/components/layout/header'
 import { Main } from '@/components/layout/main'

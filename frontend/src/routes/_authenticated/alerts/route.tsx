@@ -98,7 +98,7 @@ function AlertsPage() {
       // Handle other date formats
       const date = new Date(dateString);
       return !isNaN(date.getTime()) ? date.toLocaleString() : 'Date not available';
-    } catch (e) {
+    } catch (_e) {
       return 'Date not available';
     }
   };
@@ -160,7 +160,7 @@ function AlertsPage() {
     
     try {
       // Copy raw data content to clipboard - try different fields that might contain the data
-      let dataToUse = selectedAlert.raw_data || selectedAlert;
+      const dataToUse = selectedAlert.raw_data || selectedAlert;
       const rawData = JSON.stringify(dataToUse, null, 2);
       navigator.clipboard.writeText(rawData).then(
         () => {
@@ -177,7 +177,7 @@ function AlertsPage() {
           });
         }
       );
-    } catch (error) {
+    } catch (_error) {
       toast({
         title: 'Error',
         description: 'Could not prepare data for copying',

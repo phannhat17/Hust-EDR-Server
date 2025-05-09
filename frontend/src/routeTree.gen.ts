@@ -40,9 +40,6 @@ const authSignIn2LazyImport = createFileRoute('/(auth)/sign-in-2')()
 const authForgotPasswordLazyImport = createFileRoute(
   '/(auth)/forgot-password',
 )()
-const AuthenticatedHelpCenterIndexLazyImport = createFileRoute(
-  '/_authenticated/help-center/',
-)()
 
 // Create/Update Routes
 
@@ -164,17 +161,6 @@ const AuthenticatedAlertsRouteRoute = AuthenticatedAlertsRouteImport.update({
   path: '/alerts',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
-
-const AuthenticatedHelpCenterIndexLazyRoute =
-  AuthenticatedHelpCenterIndexLazyImport.update({
-    id: '/help-center/',
-    path: '/help-center/',
-    getParentRoute: () => AuthenticatedRouteRoute,
-  } as any).lazy(() =>
-    import('./routes/_authenticated/help-center/index.lazy').then(
-      (d) => d.Route,
-    ),
-  )
 
 const AuthenticatedRulesIndexRoute = AuthenticatedRulesIndexImport.update({
   id: '/',
@@ -360,13 +346,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedRulesIndexImport
       parentRoute: typeof AuthenticatedRulesRouteImport
     }
-    '/_authenticated/help-center/': {
-      id: '/_authenticated/help-center/'
-      path: '/help-center'
-      fullPath: '/help-center'
-      preLoaderRoute: typeof AuthenticatedHelpCenterIndexLazyImport
-      parentRoute: typeof AuthenticatedRouteImport
-    }
     '/_authenticated/agents/register/': {
       id: '/_authenticated/agents/register/'
       path: '/agents/register'
@@ -415,7 +394,6 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedIndexRoute: typeof AuthenticatedIndexRoute
   AuthenticatedAgentsIndexRoute: typeof AuthenticatedAgentsIndexRoute
   AuthenticatedCommandsIndexRoute: typeof AuthenticatedCommandsIndexRoute
-  AuthenticatedHelpCenterIndexLazyRoute: typeof AuthenticatedHelpCenterIndexLazyRoute
   AuthenticatedAgentsRegisterIndexRoute: typeof AuthenticatedAgentsRegisterIndexRoute
 }
 
@@ -427,7 +405,6 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedIndexRoute: AuthenticatedIndexRoute,
   AuthenticatedAgentsIndexRoute: AuthenticatedAgentsIndexRoute,
   AuthenticatedCommandsIndexRoute: AuthenticatedCommandsIndexRoute,
-  AuthenticatedHelpCenterIndexLazyRoute: AuthenticatedHelpCenterIndexLazyRoute,
   AuthenticatedAgentsRegisterIndexRoute: AuthenticatedAgentsRegisterIndexRoute,
 }
 
@@ -455,7 +432,6 @@ export interface FileRoutesByFullPath {
   '/alerts/': typeof AuthenticatedAlertsIndexRoute
   '/commands': typeof AuthenticatedCommandsIndexRoute
   '/rules/': typeof AuthenticatedRulesIndexRoute
-  '/help-center': typeof AuthenticatedHelpCenterIndexLazyRoute
   '/agents/register': typeof AuthenticatedAgentsRegisterIndexRoute
 }
 
@@ -477,7 +453,6 @@ export interface FileRoutesByTo {
   '/alerts': typeof AuthenticatedAlertsIndexRoute
   '/commands': typeof AuthenticatedCommandsIndexRoute
   '/rules': typeof AuthenticatedRulesIndexRoute
-  '/help-center': typeof AuthenticatedHelpCenterIndexLazyRoute
   '/agents/register': typeof AuthenticatedAgentsRegisterIndexRoute
 }
 
@@ -504,7 +479,6 @@ export interface FileRoutesById {
   '/_authenticated/alerts/': typeof AuthenticatedAlertsIndexRoute
   '/_authenticated/commands/': typeof AuthenticatedCommandsIndexRoute
   '/_authenticated/rules/': typeof AuthenticatedRulesIndexRoute
-  '/_authenticated/help-center/': typeof AuthenticatedHelpCenterIndexLazyRoute
   '/_authenticated/agents/register/': typeof AuthenticatedAgentsRegisterIndexRoute
 }
 
@@ -531,7 +505,6 @@ export interface FileRouteTypes {
     | '/alerts/'
     | '/commands'
     | '/rules/'
-    | '/help-center'
     | '/agents/register'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -552,7 +525,6 @@ export interface FileRouteTypes {
     | '/alerts'
     | '/commands'
     | '/rules'
-    | '/help-center'
     | '/agents/register'
   id:
     | '__root__'
@@ -577,7 +549,6 @@ export interface FileRouteTypes {
     | '/_authenticated/alerts/'
     | '/_authenticated/commands/'
     | '/_authenticated/rules/'
-    | '/_authenticated/help-center/'
     | '/_authenticated/agents/register/'
   fileRoutesById: FileRoutesById
 }
@@ -646,7 +617,6 @@ export const routeTree = rootRoute
         "/_authenticated/",
         "/_authenticated/agents/",
         "/_authenticated/commands/",
-        "/_authenticated/help-center/",
         "/_authenticated/agents/register/"
       ]
     },
@@ -724,10 +694,6 @@ export const routeTree = rootRoute
     "/_authenticated/rules/": {
       "filePath": "_authenticated/rules/index.tsx",
       "parent": "/_authenticated/rules"
-    },
-    "/_authenticated/help-center/": {
-      "filePath": "_authenticated/help-center/index.lazy.tsx",
-      "parent": "/_authenticated"
     },
     "/_authenticated/agents/register/": {
       "filePath": "_authenticated/agents/register/index.tsx",
