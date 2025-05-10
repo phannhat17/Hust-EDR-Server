@@ -25,6 +25,7 @@ var (
 	agentID     = flag.String("id", "", "Agent ID (generated if empty)")
 	dataDir     = flag.String("data", "data", "Data directory")
 	scanMinutes = flag.Int("scan-interval", 0, "IOC scan interval in minutes")
+	useTLS      = flag.Bool("tls", true, "Use TLS for server connection")
 )
 
 func main() {
@@ -59,6 +60,7 @@ func main() {
 			LogFile:       *logFile,
 			DataDir:       *dataDir,
 			Version:       AGENT_VERSION,
+			UseTLS:        *useTLS,
 		}
 		log.Printf("Using default configuration")
 	} else {
@@ -78,6 +80,9 @@ func main() {
 			cfg.DataDir = *dataDir
 		}
 		
+		// Simple approach: command line flag takes precedence over config file
+		cfg.UseTLS = *useTLS
+		
 		// Always update the version in config to current version
 		if cfg.Version != AGENT_VERSION {
 			cfg.Version = AGENT_VERSION
@@ -89,7 +94,7 @@ func main() {
 	}
 
 	// Create and start the EDR client
-	edrClient, err := client.NewEDRClient(cfg.ServerAddress, cfg.AgentID, cfg.DataDir)
+	edrClient, err := client.NewEDRClientWithTLS(cfg.ServerAddress, cfg.AgentID, cfg.DataDir, cfg.UseTLS)
 	if err != nil {
 		log.Fatalf("Failed to create EDR client: %v", err)
 	}

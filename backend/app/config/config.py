@@ -15,6 +15,20 @@ BASE_DIR = Path(__file__).resolve().parent.parent.parent
 class Config:
     """Base configuration for the application."""
     
+    # Get base directory
+    BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    
+    # Data directory for storage
+    DATA_DIR = os.environ.get('DATA_DIR', os.path.join(BASE_DIR, 'data'))
+    
+    # TLS Certificates directory
+    CERT_DIR = os.environ.get('CERT_DIR', os.path.join(BASE_DIR, 'cert'))
+    
+    # TLS configuration
+    GRPC_USE_TLS = os.environ.get('GRPC_USE_TLS', 'false').lower() == 'true'
+    GRPC_SERVER_KEY = os.path.join(CERT_DIR, 'server.key')
+    GRPC_SERVER_CERT = os.path.join(CERT_DIR, 'server.crt')
+    
     # Flask configuration
     SECRET_KEY = os.environ.get('SECRET_KEY', 'dev-key-please-change-in-production')
     DEBUG = os.environ.get('FLASK_DEBUG', 'true').lower() == 'true'

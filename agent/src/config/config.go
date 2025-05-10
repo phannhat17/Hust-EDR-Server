@@ -15,6 +15,7 @@ type Config struct {
 	DataDir       string `yaml:"data_dir"`
 	ScanInterval  int    `yaml:"scan_interval"`
 	Version       string `yaml:"version"`
+	UseTLS        bool   `yaml:"use_tls"`
 }
 
 // LoadConfig loads configuration from a YAML file

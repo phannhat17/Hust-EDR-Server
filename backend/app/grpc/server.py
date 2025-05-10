@@ -572,27 +572,59 @@ class EDRServicer(agent_pb2_grpc.EDRServiceServicer):
             message="IOC match report received"
         )
 
-def start_grpc_server(port=None):
+def start_grpc_server(port=None, use_tls=None):
     """Start the gRPC server in a background thread.
     
     Args:
         port (int, optional): Port number to listen on. Defaults to config.GRPC_PORT.
+        use_tls (bool, optional): Whether to use TLS encryption. Defaults to config.GRPC_USE_TLS.
     
     Returns:
         tuple: The running server instance and servicer
     """
     if port is None:
         port = config.GRPC_PORT
+    
+    if use_tls is None:
+        use_tls = config.GRPC_USE_TLS
         
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
     servicer = EDRServicer()
     agent_pb2_grpc.add_EDRServiceServicer_to_server(servicer, server)
     
-    # Listen on the specified port
-    server.add_insecure_port(f'[::]:{port}')
-    server.start()
+    # Configure TLS if enabled
+    if use_tls:
+        # Check for certificate files
+        server_key_path = config.GRPC_SERVER_KEY
+        server_cert_path = config.GRPC_SERVER_CERT
+        
+        # Make sure the certificates exist
+        if not all(os.path.exists(f) for f in [server_key_path, server_cert_path]):
+            logger.error("TLS certificates not found. Run scripts/generate_server_cert.sh to generate them.")
+            logger.warning("Falling back to insecure connection!")
+            server.add_insecure_port(f'[::]:{port}')
+            logger.info(f"EDR gRPC server started on port {port} WITHOUT encryption")
+        else:
+            # Read certificate files
+            with open(server_key_path, 'rb') as f:
+                server_key = f.read()
+            with open(server_cert_path, 'rb') as f:
+                server_cert = f.read()
+            
+            # Create server credentials
+            server_credentials = grpc.ssl_server_credentials(
+                [(server_key, server_cert)]
+            )
+            
+            # Add secure port
+            server.add_secure_port(f'[::]:{port}', server_credentials)
+            logger.info(f"EDR gRPC server started with TLS encryption on port {port}")
+    else:
+        # Start server without TLS
+        server.add_insecure_port(f'[::]:{port}')
+        logger.info(f"EDR gRPC server started on port {port} WITHOUT encryption")
     
-    logger.info(f"EDR gRPC server started on port {port}")
+    server.start()
     
     # Return both the server and servicer
     return server, servicer 
