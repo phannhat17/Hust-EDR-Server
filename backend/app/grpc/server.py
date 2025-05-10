@@ -315,25 +315,35 @@ class EDRServicer(agent_pb2_grpc.EDRServiceServicer):
         log_fn = logger.info if request.success else logger.warning
         log_fn(f"Command result from {agent_id}: {command_id} - Success: {request.success}, Duration: {request.duration_ms}ms")
         
-        # Check if this is an IOC update check - if so, don't store in command_results
-        is_ioc_update_check = False
-        for cmds in self.pending_commands.values():
-            for cmd in cmds:
-                if cmd.command_id == command_id and cmd.type == agent_pb2.CommandType.UPDATE_IOCS:
-                    is_ioc_update_check = True
-                    # Update agent's IOC version if successful
-                    if request.success:
-                        agent = self.storage.get_agent(agent_id)
-                        if agent:
-                            agent['ioc_version'] = self.ioc_manager.get_version_info()['version']
-                            self.storage.save_agent(agent_id, agent)
-                            logger.info(f"Updated agent {agent_id} IOC version to {agent['ioc_version']}")
-                    break
-            if is_ioc_update_check:
-                break
+        # Don't store IOC update related commands in command_results
+        is_ioc_related = False
         
-        # Store result unless it's an IOC update check
-        if not is_ioc_update_check:
+        # Check by command message
+        if "IOC update available" in request.message or "No IOC update available" in request.message:
+            is_ioc_related = True
+            logger.debug(f"Skipping IOC update result storage: {request.message}")
+        
+        # Check by command type in pending commands
+        if not is_ioc_related:
+            for cmds in self.pending_commands.values():
+                for cmd in cmds:
+                    if cmd.command_id == command_id and cmd.type == agent_pb2.CommandType.UPDATE_IOCS:
+                        is_ioc_related = True
+                        logger.debug(f"Skipping IOC update command result storage by command type")
+                        break
+                if is_ioc_related:
+                    break
+        
+        # Update agent's IOC version if this was a successful IOC update
+        if is_ioc_related and "IOC update available" in request.message and request.success:
+            agent = self.storage.get_agent(agent_id)
+            if agent:
+                agent['ioc_version'] = self.ioc_manager.get_version_info()['version']
+                self.storage.save_agent(agent_id, agent)
+                logger.info(f"Updated agent {agent_id} IOC version to {agent['ioc_version']}")
+        
+        # Store result only if not IOC related
+        if not is_ioc_related:
             with self.results_lock:
                 result_dict = {
                     'command_id': request.command_id,
@@ -474,13 +484,14 @@ class EDRServicer(agent_pb2_grpc.EDRServiceServicer):
             timestamp=int(time.time())
         )
         
-        # Add IP addresses
+        # Add IP addresses - using proper protobuf map field assignment
         for ip, info in iocs.get('ip_addresses', {}).items():
-            response.ip_addresses[ip] = agent_pb2.IOCData(
+            ioc_data = agent_pb2.IOCData(
                 value=ip,
                 description=info.get('description', ''),
                 severity=info.get('severity', 'medium')
             )
+            response.ip_addresses[ip].CopyFrom(ioc_data)
         
         # Add file hashes
         for file_hash, info in iocs.get('file_hashes', {}).items():
@@ -488,20 +499,22 @@ class EDRServicer(agent_pb2_grpc.EDRServiceServicer):
             if 'hash_type' in info:
                 metadata['hash_type'] = info['hash_type']
             
-            response.file_hashes[file_hash] = agent_pb2.IOCData(
+            ioc_data = agent_pb2.IOCData(
                 value=file_hash,
                 description=info.get('description', ''),
                 severity=info.get('severity', 'medium'),
                 metadata=metadata
             )
+            response.file_hashes[file_hash].CopyFrom(ioc_data)
         
         # Add URLs
         for url, info in iocs.get('urls', {}).items():
-            response.urls[url] = agent_pb2.IOCData(
+            ioc_data = agent_pb2.IOCData(
                 value=url,
                 description=info.get('description', ''),
                 severity=info.get('severity', 'medium')
             )
+            response.urls[url].CopyFrom(ioc_data)
         
         # Update agent in storage with new IOC version
         agent['ioc_version'] = server_version

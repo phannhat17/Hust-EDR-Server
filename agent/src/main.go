@@ -24,7 +24,7 @@ var (
 	logFile     = flag.String("log", "", "Log file (default: stdout)")
 	agentID     = flag.String("id", "", "Agent ID (generated if empty)")
 	dataDir     = flag.String("data", "data", "Data directory")
-	scanMinutes = flag.Int("scan-interval", 30, "IOC scan interval in minutes")
+	scanMinutes = flag.Int("scan-interval", 0, "IOC scan interval in minutes")
 )
 
 func main() {

@@ -201,8 +201,14 @@ def get_agent_ioc_matches(agent_id):
         with open(ioc_matches_file, 'r') as f:
             all_matches = json.load(f)
         
-        # Filter matches for the requested agent
-        agent_matches = [match for match in all_matches if match.get('agent_id') == agent_id]
+        # Check if all_matches is a dictionary (new format) or list (old format)
+        if isinstance(all_matches, dict):
+            # New format: dictionary with match_id as keys
+            agent_matches = [match_data for match_id, match_data in all_matches.items() 
+                            if match_data.get('agent_id') == agent_id]
+        else:
+            # Old format: list of match objects
+            agent_matches = [match for match in all_matches if match.get('agent_id') == agent_id]
         
         logger.info(f"Found {len(agent_matches)} IOC matches for agent {agent_id}")
         return jsonify(agent_matches)

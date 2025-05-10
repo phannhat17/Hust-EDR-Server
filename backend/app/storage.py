@@ -54,7 +54,9 @@ class FileStorage:
     def _load_ioc_matches(self):
         """Load IOC matches from file."""
         self.ioc_matches = self._load_json(self.ioc_matches_file, "IOC matches")
-        if self.ioc_matches is None:
+        if self.ioc_matches is None or not isinstance(self.ioc_matches, dict):
+            # Ensure ioc_matches is a dictionary
+            logger.warning(f"IOC matches data is not a dictionary, resetting to empty dictionary")
             self.ioc_matches = {}
             self._save_json(self.ioc_matches, self.ioc_matches_file)
     
@@ -106,11 +108,22 @@ class FileStorage:
     
     def save_ioc_match(self, match_id, match_data):
         """Save IOC match data."""
-        self.ioc_matches[match_id] = match_data
-        success = self._save_json(self.ioc_matches, self.ioc_matches_file)
-        if success:
-            debug_logger.info(f"Saved IOC match {match_id} to storage")
-        return success
+        try:
+            # Ensure ioc_matches is a dictionary
+            if not isinstance(self.ioc_matches, dict):
+                logger.error(f"ioc_matches is not a dictionary: {type(self.ioc_matches)}")
+                self.ioc_matches = {}
+            
+            self.ioc_matches[match_id] = match_data
+            success = self._save_json(self.ioc_matches, self.ioc_matches_file)
+            if success:
+                debug_logger.info(f"Saved IOC match {match_id} to storage")
+            return success
+        except Exception as e:
+            logger.error(f"Error saving IOC match: {e}")
+            # Try to recover by resetting to empty dict
+            self.ioc_matches = {match_id: match_data}
+            return self._save_json(self.ioc_matches, self.ioc_matches_file)
     
     def get_agent(self, agent_id):
         """Get an agent by ID."""

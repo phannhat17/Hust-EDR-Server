@@ -39,7 +39,7 @@ func LoadConfig(filename string) (*Config, error) {
 		cfg.DataDir = "data"
 	}
 	if cfg.ScanInterval <= 0 {
-		cfg.ScanInterval = 30
+		cfg.ScanInterval = 5
 	}
 	if cfg.Version == "" {
 		cfg.Version = "1.0.0"
