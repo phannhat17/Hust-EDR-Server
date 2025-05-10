@@ -22,10 +22,11 @@ type EDRClient struct {
 	edrClient     pb.EDRServiceClient
 	cmdHandler    *CommandHandler
 	agentVersion  string
+	dataDir       string
 }
 
 // NewEDRClient creates a new EDR client
-func NewEDRClient(serverAddress, agentID string) (*EDRClient, error) {
+func NewEDRClient(serverAddress, agentID string, dataDir string) (*EDRClient, error) {
 	// Connect to the gRPC server
 	conn, err := grpc.Dial(serverAddress, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
@@ -39,6 +40,7 @@ func NewEDRClient(serverAddress, agentID string) (*EDRClient, error) {
 		conn:          conn,
 		edrClient:     pb.NewEDRServiceClient(conn),
 		agentVersion:  "1.0.0", // Default version
+		dataDir:       dataDir,  // Initialize dataDir
 	}
 
 	// Create command handler

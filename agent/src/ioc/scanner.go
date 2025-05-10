@@ -155,9 +155,16 @@ func (s *Scanner) Start() {
 	// Run initial scan
 	go s.runScan()
 	
-	// Start periodic scans
+	// Start periodic scans only if interval is positive
 	go func() {
-		ticker := time.NewTicker(time.Duration(s.intervalMinutes) * time.Minute)
+		// Use default interval of 5 minutes if intervalMinutes is non-positive
+		interval := s.intervalMinutes
+		if interval <= 0 {
+			interval = 5
+			log.Printf("WARNING: Scanner interval was %d minutes, defaulting to %d minutes", s.intervalMinutes, interval)
+		}
+		
+		ticker := time.NewTicker(time.Duration(interval) * time.Minute)
 		defer ticker.Stop()
 		
 		for {

@@ -23,9 +23,12 @@ type CommandHandler struct {
 
 // NewCommandHandler creates a new command handler
 func NewCommandHandler(client *EDRClient) *CommandHandler {
+	// Use the data directory from the client's configuration
+	iocsPath := filepath.Join(client.dataDir, "iocs")
+	
 	return &CommandHandler{
 		client: client,
-		iocManager: ioc.NewManager("data/iocs"),
+		iocManager: ioc.NewManager(iocsPath),
 	}
 }
 
