@@ -3,16 +3,13 @@
 Main entry point for the EDR backend application.
 """
 
-import logging
+import os
 from app import create_app
 from app.config.config import config
+from app.logging_setup import get_logger
 
-# Configure logging
-logging.basicConfig(
-    level=getattr(logging, config.LOG_LEVEL),
-    format=config.LOG_FORMAT
-)
-logger = logging.getLogger(__name__)
+# Get application logger
+logger = get_logger('app.server')
 
 # Create the Flask application
 app = create_app()
