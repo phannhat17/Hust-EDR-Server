@@ -38,7 +38,11 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
 // Add this function to get severity badge
 function getSeverityBadge(severity: SeverityLevel | string) {
-  switch (severity) {
+  const capitalized = typeof severity === 'string' 
+    ? severity.charAt(0).toUpperCase() + severity.slice(1).toLowerCase()
+    : severity;
+    
+  switch (severity.toLowerCase()) {
     case 'critical':
       return <Badge variant="destructive">Critical</Badge>
     case 'high':
@@ -48,7 +52,7 @@ function getSeverityBadge(severity: SeverityLevel | string) {
     case 'low':
       return <Badge variant="outline">Low</Badge>
     default:
-      return <Badge variant="outline">{severity}</Badge>
+      return <Badge variant="outline">{capitalized}</Badge>
   }
 }
 
