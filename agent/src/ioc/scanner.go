@@ -14,10 +14,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
-	"runtime"
 	"strings"
 	"time"
-	"bufio"
 
 	pb "agent/proto"
 )
@@ -31,7 +29,6 @@ type Scanner struct {
 	cancel          context.CancelFunc
 	networkBlocker  *NetworkBlocker
 	sysmonLogPath   string
-	lastReadPosition int64
 }
 
 // NetworkBlocker handles blocking of malicious IPs and URLs
@@ -52,14 +49,8 @@ func NewNetworkBlocker() *NetworkBlocker {
 func NewScanner(manager *Manager, reportCallback func(context.Context, pb.IOCType, string, string, string, string) error, intervalMinutes int) *Scanner {
 	ctx, cancel := context.WithCancel(context.Background())
 	
-	// Determine sysmon log path based on OS
-	var sysmonLogPath string
-	if runtime.GOOS == "windows" {
-		sysmonLogPath = "C:\\Windows\\System32\\winevt\\Logs\\Microsoft-Windows-Sysmon%4Operational.evtx"
-	} else {
-		// For Linux, assume sysmon logs to syslog
-		sysmonLogPath = "/var/log/syslog"
-	}
+	// Windows sysmon log path
+	sysmonLogPath := "C:\\Windows\\System32\\winevt\\Logs\\Microsoft-Windows-Sysmon%4Operational.evtx"
 	
 	return &Scanner{
 		manager:         manager,
@@ -69,7 +60,6 @@ func NewScanner(manager *Manager, reportCallback func(context.Context, pb.IOCTyp
 		cancel:          cancel,
 		networkBlocker:  NewNetworkBlocker(),
 		sysmonLogPath:   sysmonLogPath,
-		lastReadPosition: 0,
 	}
 }
 
@@ -118,7 +108,7 @@ func (s *Scanner) initializeIPBlocking() {
 	log.Printf("IP blocking initialized for %d IPs", len(s.networkBlocker.blockedIPs))
 }
 
-// blockIP blocks an IP immediately
+// blockIP blocks an IP immediately using Windows Firewall
 func (s *Scanner) blockIP(ip string) {
 	// Check if already blocked
 	if s.networkBlocker.blockedIPs[ip] {
@@ -128,35 +118,22 @@ func (s *Scanner) blockIP(ip string) {
 	var err error
 	var message string
 	
-	// Block IP based on OS
-	if runtime.GOOS == "windows" {
-		// Windows firewall
-		cmd := exec.Command("netsh", "advfirewall", "firewall", "add", "rule",
-			"name=BlockEDR_"+ip,
-			"dir=out",
+	// Windows firewall - outbound rule
+	cmd := exec.Command("netsh", "advfirewall", "firewall", "add", "rule",
+		"name=BlockEDR_"+ip,
+		"dir=out",
+		"action=block",
+		"remoteip="+ip)
+	_, err = cmd.Output()
+	
+	// Add inbound rule too
+	if err == nil {
+		cmd = exec.Command("netsh", "advfirewall", "firewall", "add", "rule",
+			"name=BlockEDR_In_"+ip,
+			"dir=in",
 			"action=block",
 			"remoteip="+ip)
 		_, err = cmd.Output()
-		
-		// Add inbound rule too
-		if err == nil {
-			cmd = exec.Command("netsh", "advfirewall", "firewall", "add", "rule",
-				"name=BlockEDR_In_"+ip,
-				"dir=in",
-				"action=block",
-				"remoteip="+ip)
-			_, err = cmd.Output()
-		}
-	} else {
-		// Linux iptables
-		cmd := exec.Command("iptables", "-A", "OUTPUT", "-d", ip, "-j", "DROP")
-		_, err = cmd.Output()
-		
-		// Add inbound rule too
-		if err == nil {
-			cmd = exec.Command("iptables", "-A", "INPUT", "-s", ip, "-j", "DROP")
-			_, err = cmd.Output()
-		}
 	}
 	
 	if err != nil {
@@ -214,15 +191,10 @@ func (s *Scanner) checkAndBlockNewIPs() {
 	s.manager.mu.RUnlock()
 }
 
-// scanSysmonLogs scans sysmon logs for file creation events and checks hashes
+// scanSysmonLogs scans Windows sysmon logs for file creation events and checks hashes
 func (s *Scanner) scanSysmonLogs() {
-	log.Printf("Scanning sysmon logs for file hash matches")
-	
-	if runtime.GOOS == "windows" {
-		s.scanWindowsSysmonLogs()
-	} else {
-		s.scanLinuxSysmonLogs()
-	}
+	log.Printf("Scanning Windows sysmon logs for file hash matches")
+	s.scanWindowsSysmonLogs()
 }
 
 // scanWindowsSysmonLogs scans Windows Sysmon event logs for file creation events
@@ -248,7 +220,6 @@ func (s *Scanner) scanWindowsSysmonLogs() {
 	defer os.Remove(tempFile)
 	
 	// Parse the XML for file hash information
-	// Note: This is simplified - real implementation would parse the XML properly
 	fileContent, err := os.ReadFile(tempFile)
 	if err != nil {
 		log.Printf("Failed to read sysmon export: %v", err)
@@ -307,78 +278,6 @@ func (s *Scanner) scanWindowsSysmonLogs() {
 				}
 			}
 		}
-	}
-}
-
-// scanLinuxSysmonLogs scans Linux sysmon logs for file creation events
-func (s *Scanner) scanLinuxSysmonLogs() {
-	// For Linux, we assume syslog format with sysmon entries
-	// Only read new log entries since last check
-	file, err := os.Open(s.sysmonLogPath)
-	if err != nil {
-		log.Printf("Failed to open sysmon log: %v", err)
-		return
-	}
-	defer file.Close()
-	
-	// Seek to last read position
-	if s.lastReadPosition > 0 {
-		_, err = file.Seek(s.lastReadPosition, 0)
-		if err != nil {
-			log.Printf("Failed to seek in log file: %v", err)
-			s.lastReadPosition = 0
-		}
-	}
-	
-	scanner := bufio.NewScanner(file)
-	
-	// Match sysmon FileCreate or Process Create events
-	// This pattern would need to be adjusted based on actual sysmon log format on Linux
-	logPattern := regexp.MustCompile(`Sysmon.+(EventID 1|EventID 11).+Hash: ([A-Fa-f0-9]+).+TargetFilename: (.+?)[\s|$]`)
-	
-	for scanner.Scan() {
-		line := scanner.Text()
-		
-		matches := logPattern.FindStringSubmatch(line)
-		if len(matches) >= 4 {
-			hashValue := matches[2]
-			filePath := matches[3]
-			
-			// Check if hash matches IOCs
-			match, ioc := s.manager.CheckFileHash(hashValue)
-			if match {
-				log.Printf("Found file hash IOC match: %s (%s)", filePath, hashValue)
-				
-				// Delete the malicious file
-				if err := os.Remove(filePath); err != nil {
-					log.Printf("Failed to delete malicious file %s: %v", filePath, err)
-				} else {
-					log.Printf("Successfully deleted malicious file: %s", filePath)
-				}
-				
-				// Report the match
-				if s.reportCallback != nil {
-					s.reportCallback(
-						s.ctx,
-						pb.IOCType_IOC_HASH,
-						ioc.Value,
-						hashValue,
-						fmt.Sprintf("Malicious file: %s (deleted: %v)", filePath, err == nil),
-						ioc.Severity,
-					)
-				}
-			}
-		}
-	}
-	
-	// Remember position for next read
-	pos, err := file.Seek(0, io.SeekCurrent)
-	if err == nil {
-		s.lastReadPosition = pos
-	}
-	
-	if err := scanner.Err(); err != nil {
-		log.Printf("Error scanning sysmon log: %v", err)
 	}
 }
 
