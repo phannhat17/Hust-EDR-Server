@@ -24,7 +24,8 @@ var (
 	logFile     = flag.String("log", "", "Log file (default: stdout)")
 	agentID     = flag.String("id", "", "Agent ID (generated if empty)")
 	dataDir     = flag.String("data", "data", "Data directory")
-	scanMinutes = flag.Int("scan-interval", 30, "IOC scan interval in minutes")
+	scanMinutes = flag.Int("scan-interval", 0, "IOC scan interval in minutes")
+	useTLS      = flag.Bool("tls", true, "Use TLS for server connection")
 )
 
 func main() {
@@ -59,6 +60,7 @@ func main() {
 			LogFile:       *logFile,
 			DataDir:       *dataDir,
 			Version:       AGENT_VERSION,
+			UseTLS:        *useTLS,
 		}
 		log.Printf("Using default configuration")
 	} else {
@@ -78,6 +80,9 @@ func main() {
 			cfg.DataDir = *dataDir
 		}
 		
+		// Simple approach: command line flag takes precedence over config file
+		cfg.UseTLS = *useTLS
+		
 		// Always update the version in config to current version
 		if cfg.Version != AGENT_VERSION {
 			cfg.Version = AGENT_VERSION
@@ -89,7 +94,7 @@ func main() {
 	}
 
 	// Create and start the EDR client
-	edrClient, err := client.NewEDRClient(cfg.ServerAddress, cfg.AgentID)
+	edrClient, err := client.NewEDRClientWithTLS(cfg.ServerAddress, cfg.AgentID, cfg.DataDir, cfg.UseTLS)
 	if err != nil {
 		log.Fatalf("Failed to create EDR client: %v", err)
 	}
@@ -127,18 +132,25 @@ func main() {
 	// Get command handler to access IOC functionality
 	commandHandler := edrClient.GetCommandHandler()
 	
+	// Use config scan interval if command-line flag wasn't explicitly set
+	intervalMinutes := *scanMinutes
+	if flag.Lookup("scan-interval").DefValue == flag.Lookup("scan-interval").Value.String() {
+		intervalMinutes = cfg.ScanInterval
+		log.Printf("Using scan interval from config: %d minutes", intervalMinutes)
+	}
+	
 	// Configure and start IOC scanner
 	scanner := ioc.NewScanner(
 		commandHandler.GetIOCManager(),
 		commandHandler.ReportIOCMatch,
-		*scanMinutes,
+		intervalMinutes,
 	)
 	
 	// Start IOC scanning
 	scanner.Start()
 	
 	log.Printf("EDR agent started (ID: %s, Server: %s)", agentInfo.AgentID, cfg.ServerAddress)
-	log.Printf("IOC scanner started with %d minute interval", *scanMinutes)
+	log.Printf("IOC scanner started with %d minute interval", intervalMinutes)
 
 	// Handle graceful shutdown
 	sigChan := make(chan os.Signal, 1)

@@ -9,7 +9,9 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
+	"crypto/tls"
 
 	pb "agent/proto"
 )
@@ -22,14 +24,40 @@ type EDRClient struct {
 	edrClient     pb.EDRServiceClient
 	cmdHandler    *CommandHandler
 	agentVersion  string
+	dataDir       string
+	useTLS        bool
 }
 
 // NewEDRClient creates a new EDR client
-func NewEDRClient(serverAddress, agentID string) (*EDRClient, error) {
-	// Connect to the gRPC server
-	conn, err := grpc.Dial(serverAddress, grpc.WithTransportCredentials(insecure.NewCredentials()))
-	if err != nil {
-		return nil, fmt.Errorf("failed to connect to server: %v", err)
+func NewEDRClient(serverAddress, agentID string, dataDir string) (*EDRClient, error) {
+	return NewEDRClientWithTLS(serverAddress, agentID, dataDir, false)
+}
+
+// NewEDRClientWithTLS creates a new EDR client with TLS enabled
+func NewEDRClientWithTLS(serverAddress, agentID string, dataDir string, useTLS bool) (*EDRClient, error) {
+	var conn *grpc.ClientConn
+	var err error
+
+	if useTLS {
+		// Create the credentials and skip certificate verification for self-signed certs
+		creds := credentials.NewTLS(&tls.Config{
+			InsecureSkipVerify: true, // Skip certificate verification for testing
+		})
+
+		conn, err = grpc.Dial(serverAddress, grpc.WithTransportCredentials(creds))
+		if err != nil {
+			return nil, fmt.Errorf("failed to connect to server with TLS: %v", err)
+		}
+		
+		log.Printf("Connected to server %s with TLS encryption (insecure mode)", serverAddress)
+	} else {
+		// Connect without TLS (insecure)
+		conn, err = grpc.Dial(serverAddress, grpc.WithTransportCredentials(insecure.NewCredentials()))
+		if err != nil {
+			return nil, fmt.Errorf("failed to connect to server: %v", err)
+		}
+		
+		log.Printf("Connected to server %s without encryption (not recommended)", serverAddress)
 	}
 
 	// Create client
@@ -39,6 +67,8 @@ func NewEDRClient(serverAddress, agentID string) (*EDRClient, error) {
 		conn:          conn,
 		edrClient:     pb.NewEDRServiceClient(conn),
 		agentVersion:  "1.0.0", // Default version
+		dataDir:       dataDir,
+		useTLS:        useTLS,
 	}
 
 	// Create command handler

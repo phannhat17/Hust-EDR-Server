@@ -3,65 +3,20 @@ Flask application factory.
 """
 
 import os
-import logging
-import logging.handlers
 import threading
 import time
 from pathlib import Path
 from flask import Flask, jsonify, request, abort
 from flask_cors import CORS
 from app.config.config import config
+from app.logging_setup import setup_logging, get_logger
 from app.elastalert import ElastAlertClient
 
-# Set up logging directory
-log_dir = Path(config.LOG_DIR)
-log_dir.mkdir(parents=True, exist_ok=True)
-
-# Configure root logger
-root_logger = logging.getLogger()
-root_logger.setLevel(getattr(logging, config.LOG_LEVEL))
-
-# Silence Flask/Werkzeug HTTP request logs
-logging.getLogger('werkzeug').setLevel(logging.ERROR)
-logging.getLogger('flask').setLevel(logging.ERROR)
-
-# Define log formatters
-standard_formatter = logging.Formatter(config.LOG_FORMAT)
-detailed_formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(threadName)s - %(filename)s:%(lineno)d - %(message)s')
-
-# Create file handlers for different components
-def create_component_handler(component_name, level=logging.INFO):
-    log_file = log_dir / f"{component_name}.log"
-    handler = logging.handlers.RotatingFileHandler(
-        log_file, maxBytes=10485760, backupCount=5  # 10MB files, keep 5 backups
-    )
-    handler.setLevel(level)
-    handler.setFormatter(detailed_formatter)
-    return handler
-
-# Add handlers for specific components
-components = {
-    'app': logging.getLogger('app'),
-    'api': logging.getLogger('app.api'),
-    'grpc': logging.getLogger('app.grpc'),
-    'elastalert': logging.getLogger('app.elastalert'),
-}
-
-for name, logger in components.items():
-    logger.addHandler(create_component_handler(name))
-    logger.propagate = False  # Prevent duplicate logs in parent loggers
-
-# Create special handlers for error logs (across all components)
-error_handler = logging.handlers.RotatingFileHandler(
-    log_dir / "error.log", maxBytes=10485760, backupCount=5
-)
-error_handler.setLevel(logging.ERROR)
-error_handler.setFormatter(detailed_formatter)
-root_logger.addHandler(error_handler)
+# Initialize logging system
+setup_logging(include_console=config.DEBUG)
 
 # Get main application logger
-logger = logging.getLogger('app')
-logger.info(f"Logging initialized with level {config.LOG_LEVEL} in directory {log_dir}")
+logger = get_logger('app')
 
 # Global variables
 grpc_server = None
@@ -122,6 +77,8 @@ def create_app():
     # API key middleware for all API routes
     @app.before_request
     def check_api_key():
+        security_logger = get_logger('app.security')
+        
         # Skip API key check for health check endpoint and root
         if request.path == '/health' or request.path == '/':
             return
@@ -138,7 +95,7 @@ def create_app():
         if request.path.startswith('/api/'):
             api_key = request.headers.get(config.API_KEY_HEADER)
             if api_key != config.API_KEY:
-                logger.warning(f"Unauthorized access attempt from {request.remote_addr} - invalid API key")
+                security_logger.warning(f"Unauthorized access attempt from {request.remote_addr} - invalid API key")
                 return jsonify({"error": "Unauthorized - Invalid API key"}), 401
     
     # Health check endpoint (no auth required)
@@ -170,6 +127,7 @@ def create_app():
         
     @app.errorhandler(500)
     def server_error(e):
+        logger.error(f"Internal server error: {str(e)}")
         return jsonify({"error": "Internal server error"}), 500
         
     return app
@@ -184,7 +142,7 @@ def shutdown_background_threads():
         # Force save any pending agent data
         if hasattr(grpc_servicer, 'storage'):
             logger.info("Saving pending agent data...")
-            grpc_servicer.storage._save_agents(force=True)
+            grpc_servicer.storage.force_save()
             
         grpc_server.stop(grace=5)
         logger.info("gRPC server stopped")

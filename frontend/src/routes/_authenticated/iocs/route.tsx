@@ -14,8 +14,7 @@ import {
   TableRow 
 } from '@/components/ui/table'
 import { Badge } from '@/components/ui/badge'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Search } from '@/components/search'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ThemeSwitch } from '@/components/theme-switch'
 import { Header } from '@/components/layout/header'
 import { Main } from '@/components/layout/main'
@@ -174,17 +173,21 @@ function IOCsPage() {
   
   // Get severity badge
   const getSeverityBadge = (severity: SeverityType) => {
-    switch (severity) {
+    const capitalized = typeof severity === 'string'
+      ? severity.charAt(0).toUpperCase() + severity.slice(1).toLowerCase()
+      : severity;
+      
+    switch (severity.toLowerCase()) {
       case 'low':
         return <Badge variant="outline">Low</Badge>
       case 'medium':
-        return <Badge variant="outline" className="bg-yellow-50">Medium</Badge>
+        return <Badge variant="secondary">Medium</Badge>
       case 'high':
-        return <Badge variant="outline" className="bg-orange-50">High</Badge>
+        return <Badge variant="destructive">High</Badge>
       case 'critical':
         return <Badge variant="destructive">Critical</Badge>
       default:
-        return <Badge variant="outline">Unknown</Badge>
+        return <Badge variant="outline">{capitalized}</Badge>
     }
   }
   

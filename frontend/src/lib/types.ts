@@ -38,26 +38,6 @@ export interface Rule {
   [key: string]: any;
 }
 
-export interface DashboardStats {
-  total_alerts: number;
-  new_alerts: number;
-  resolved_alerts: number;
-  false_positives: number;
-  active_agents: number;
-  total_rules: number;
-  active_rules: number;
-}
-
-export interface AlertByStatus {
-  status: 'new' | 'in_progress' | 'resolved' | 'false_positive';
-  count: number;
-}
-
-export interface AlertByTime {
-  date: string;
-  count: number;
-}
-
 export interface Agent {
   id: string;
   hostname: string;

@@ -6,7 +6,7 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Tabs, TabsContent } from '@/components/ui/tabs'
 import { Header } from '@/components/layout/header'
 import { Main } from '@/components/layout/main'
 import { TopNav } from '@/components/layout/top-nav'
@@ -20,6 +20,7 @@ import { useState } from 'react'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Agent } from '@/lib/types'
 import { Badge } from '@/components/ui/badge'
+import { Link } from '@tanstack/react-router'
 
 export default function Dashboard() {
   const [timeRange, setTimeRange] = useState('7d');
@@ -204,14 +205,16 @@ export default function Dashboard() {
                           </div>
                           <div className="ml-auto">
                             <Badge variant={agent.status === 'ONLINE' ? "green" : "black"}>
-                              {agent.status}
+                              {agent.status === 'ONLINE' ? 'ONLINE' : 'OFFLINE'}
                             </Badge>
                           </div>
                         </div>
                       ))}
                       {agentStats.agents.length > 5 && (
-                        <Button variant="link" className="text-sm">
-                          View all {agentStats.agents.length} agents
+                        <Button variant="link" className="text-sm" asChild>
+                          <Link to="/agents">
+                            View all {agentStats.agents.length} agents
+                          </Link>
                         </Button>
                       )}
                     </div>

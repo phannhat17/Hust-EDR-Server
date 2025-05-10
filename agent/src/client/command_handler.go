@@ -23,9 +23,12 @@ type CommandHandler struct {
 
 // NewCommandHandler creates a new command handler
 func NewCommandHandler(client *EDRClient) *CommandHandler {
+	// Use the data directory from the client's configuration
+	iocsPath := filepath.Join(client.dataDir, "iocs")
+	
 	return &CommandHandler{
 		client: client,
-		iocManager: ioc.NewManager("data/iocs"),
+		iocManager: ioc.NewManager(iocsPath),
 	}
 }
 
@@ -174,19 +177,53 @@ func (h *CommandHandler) ReportIOCMatch(ctx context.Context, iocType pb.IOCType,
 	
 	reportID := fmt.Sprintf("%s-%d", h.client.agentID, time.Now().UnixNano())
 	
+	// Determine action taken based on the context message
+	var actionTaken pb.CommandType = pb.CommandType_UNKNOWN
+	actionSuccess := false
+	actionMessage := ""
+	
+	// Check for specific messages that indicate an action was taken
+	// For IP blocking
+	if iocType == pb.IOCType_IOC_IP && strings.Contains(matchContext, "IP automatically blocked") {
+		actionTaken = pb.CommandType_BLOCK_IP
+		actionSuccess = true
+		actionMessage = fmt.Sprintf("Successfully blocked IP %s using Windows Firewall", matchedValue)
+	}
+	
+	// For URL blocking
+	if iocType == pb.IOCType_IOC_URL && strings.Contains(matchContext, "URL blocked by adding domain") {
+		actionTaken = pb.CommandType_BLOCK_URL
+		actionSuccess = true
+		actionMessage = fmt.Sprintf("Successfully blocked URL %s", matchedValue)
+	}
+	
+	// For file deletion after hash match
+	if iocType == pb.IOCType_IOC_HASH && strings.Contains(matchContext, "Malicious file") {
+		if strings.Contains(matchContext, "deleted: true") {
+			actionTaken = pb.CommandType_DELETE_FILE
+			actionSuccess = true
+			actionMessage = "Successfully deleted malicious file"
+		}
+	}
+	
 	report := &pb.IOCMatchReport{
-		ReportId:     reportID,
-		AgentId:      h.client.agentID,
-		Timestamp:    time.Now().Unix(),
-		Type:         iocType,
-		IocValue:     iocValue,
-		MatchedValue: matchedValue,
-		Context:      matchContext,
-		Severity:     severity,
-		ActionTaken:  pb.CommandType_UNKNOWN,
+		ReportId:       reportID,
+		AgentId:        h.client.agentID,
+		Timestamp:      time.Now().Unix(),
+		Type:           iocType,
+		IocValue:       iocValue,
+		MatchedValue:   matchedValue,
+		Context:        matchContext,
+		Severity:       severity,
+		ActionTaken:    actionTaken,
+		ActionSuccess:  actionSuccess,
+		ActionMessage:  actionMessage,
 	}
 	
 	log.Printf("Reporting IOC match: %s - %s (severity: %s)", pb.IOCType_name[int32(iocType)], iocValue, severity)
+	if actionTaken != pb.CommandType_UNKNOWN {
+		log.Printf("Action reported: %s (success: %v)", pb.CommandType_name[int32(actionTaken)], actionSuccess)
+	}
 	
 	// Send report to server
 	resp, err := h.client.edrClient.ReportIOCMatch(ctx, report)
@@ -353,56 +390,30 @@ func (h *CommandHandler) handleKillProcess(params map[string]string) (string, er
 	return fmt.Sprintf("Process %d killed successfully", pid), nil
 }
 
-// findProcessIDByName finds a process ID by name
+// findProcessIDByName finds a process ID by process name
 func (h *CommandHandler) findProcessIDByName(name string) (int, error) {
 	var cmd *exec.Cmd
 	
-	if isWindows() {
-		// Use TASKLIST on Windows
-		cmd = exec.Command("tasklist", "/FI", fmt.Sprintf("IMAGENAME eq %s", name), "/NH", "/FO", "CSV")
-	} else {
-		// Use ps on Unix-like systems
-		cmd = exec.Command("ps", "-eo", "pid,comm")
-	}
+	// Use TASKLIST on Windows
+	cmd = exec.Command("tasklist", "/FI", fmt.Sprintf("IMAGENAME eq %s", name), "/NH", "/FO", "CSV")
 	
 	output, err := cmd.Output()
 	if err != nil {
 		return 0, fmt.Errorf("failed to execute process list command: %v", err)
 	}
 	
-	// Parse the output to find PID
-	if isWindows() {
-		// Parse Windows TASKLIST output (CSV format)
-		lines := strings.Split(string(output), "\n")
-		for _, line := range lines {
-			if strings.Contains(line, name) {
-				// Parse CSV line
-				parts := strings.Split(line, ",")
-				if len(parts) >= 2 {
-					// Remove quotes from process name and PID
-					processName := strings.Trim(parts[0], "\"")
-					pidStr := strings.Trim(parts[1], "\"")
-					
-					if strings.EqualFold(processName, name) {
-						pid, err := strconv.Atoi(pidStr)
-						if err == nil {
-							return pid, nil
-						}
-					}
-				}
-			}
-		}
-	} else {
-		// Parse Unix ps output
-		lines := strings.Split(string(output), "\n")
-		for _, line := range lines {
-			fields := strings.Fields(line)
-			if len(fields) >= 2 {
-				pidStr := fields[0]
-				processName := fields[1]
+	// Parse Windows TASKLIST output (CSV format)
+	lines := strings.Split(string(output), "\n")
+	for _, line := range lines {
+		if strings.Contains(line, name) {
+			// Parse CSV line
+			parts := strings.Split(line, ",")
+			if len(parts) >= 2 {
+				// Remove quotes from process name and PID
+				processName := strings.Trim(parts[0], "\"")
+				pidStr := strings.Trim(parts[1], "\"")
 				
-				// Check if this is the process we're looking for
-				if strings.Contains(processName, name) {
+				if strings.EqualFold(processName, name) {
 					pid, err := strconv.Atoi(pidStr)
 					if err == nil {
 						return pid, nil
@@ -428,21 +439,8 @@ func (h *CommandHandler) handleKillProcessTree(params map[string]string) (string
 		return "", fmt.Errorf("invalid PID format: %v", err)
 	}
 
-	var cmd *exec.Cmd
-	if isWindows() {
-		// Use TASKKILL on Windows with /T flag for tree kill
-		cmd = exec.Command("taskkill", "/F", "/T", "/PID", pidStr)
-	} else {
-		// On Linux/Unix, we need to use pkill with parent PID
-		cmd = exec.Command("sh", "-c", fmt.Sprintf("pkill -TERM -P %d", pid))
-		// Then kill the parent process
-		defer func() {
-			process, _ := os.FindProcess(pid)
-			if process != nil {
-				process.Kill()
-			}
-		}()
-	}
+	// Use TASKKILL on Windows with /T flag for tree kill
+	cmd := exec.Command("taskkill", "/F", "/T", "/PID", pidStr)
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -459,15 +457,9 @@ func (h *CommandHandler) handleBlockIP(params map[string]string) (string, error)
 		return "", fmt.Errorf("missing required parameter 'ip'")
 	}
 
-	var cmd *exec.Cmd
-	if isWindows() {
-		// Use Windows Firewall
-		cmdStr := fmt.Sprintf("netsh advfirewall firewall add rule name=\"EDR Block %s\" dir=in action=block remoteip=%s", ip, ip)
-		cmd = exec.Command("cmd", "/C", cmdStr)
-	} else {
-		// Use iptables on Linux
-		cmd = exec.Command("iptables", "-A", "INPUT", "-s", ip, "-j", "DROP")
-	}
+	// Use Windows Firewall
+	cmdStr := fmt.Sprintf("netsh advfirewall firewall add rule name=\"EDR Block %s\" dir=in action=block remoteip=%s", ip, ip)
+	cmd := exec.Command("cmd", "/C", cmdStr)
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -498,10 +490,7 @@ func (h *CommandHandler) handleBlockURL(params map[string]string) (string, error
 	}
 
 	// Block at hosts file level
-	hostsFile := "/etc/hosts"
-	if isWindows() {
-		hostsFile = "C:\\Windows\\System32\\drivers\\etc\\hosts"
-	}
+	hostsFile := "C:\\Windows\\System32\\drivers\\etc\\hosts"
 
 	// Check if entry already exists
 	content, err := os.ReadFile(hostsFile)
@@ -548,105 +537,37 @@ func (h *CommandHandler) handleNetworkIsolate(params map[string]string) (string,
 		}
 	}
 
-	if isWindows() {
-		// Use Windows Firewall to isolate
-		// First, block all inbound connections
-		inboundCmd := exec.Command("netsh", "advfirewall", "set", "allprofiles", "firewallpolicy", "blockinbound,blockoutbound")
-		_, err := inboundCmd.CombinedOutput()
-		if err != nil {
-			return "", fmt.Errorf("failed to set firewall policy: %v", err)
-		}
-		
-		// Then add rules for allowed IPs
-		if allowedIPs != "" {
-			allowedIPList := strings.Split(allowedIPs, ",")
-			for _, ip := range allowedIPList {
-				ip = strings.TrimSpace(ip)
-				if ip == "" {
-					continue
-				}
-				
-				// Allow inbound connections from allowed IP
-				inCmd := exec.Command("netsh", "advfirewall", "firewall", "add", "rule", 
-					fmt.Sprintf("name=EDR-Allow-%s-In", ip), "dir=in", "action=allow", fmt.Sprintf("remoteip=%s", ip))
-				_, err := inCmd.CombinedOutput()
-				if err != nil {
-					log.Printf("WARNING: Failed to add inbound rule for %s: %v", ip, err)
-				}
-				
-				// Allow outbound connections to allowed IP
-				outCmd := exec.Command("netsh", "advfirewall", "firewall", "add", "rule", 
-					fmt.Sprintf("name=EDR-Allow-%s-Out", ip), "dir=out", "action=allow", fmt.Sprintf("remoteip=%s", ip))
-				_, err = outCmd.CombinedOutput()
-				if err != nil {
-					log.Printf("WARNING: Failed to add outbound rule for %s: %v", ip, err)
-				}
+	// Use Windows Firewall to isolate
+	// First, block all inbound connections
+	inboundCmd := exec.Command("netsh", "advfirewall", "set", "allprofiles", "firewallpolicy", "blockinbound,blockoutbound")
+	_, err := inboundCmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("failed to set firewall policy: %v", err)
+	}
+	
+	// Then add rules for allowed IPs
+	if allowedIPs != "" {
+		allowedIPList := strings.Split(allowedIPs, ",")
+		for _, ip := range allowedIPList {
+			ip = strings.TrimSpace(ip)
+			if ip == "" {
+				continue
 			}
-		}
-	} else {
-		// Use iptables on Linux
-		// First, flush existing rules
-		flushCmd := exec.Command("iptables", "-F")
-		_, err := flushCmd.CombinedOutput()
-		if err != nil {
-			return "", fmt.Errorf("failed to flush iptables rules: %v", err)
-		}
-		
-		// Set default policies to DROP
-		inputCmd := exec.Command("iptables", "-P", "INPUT", "DROP")
-		_, err = inputCmd.CombinedOutput()
-		if err != nil {
-			return "", fmt.Errorf("failed to set INPUT policy: %v", err)
-		}
-		
-		outputCmd := exec.Command("iptables", "-P", "OUTPUT", "DROP")
-		_, err = outputCmd.CombinedOutput()
-		if err != nil {
-			return "", fmt.Errorf("failed to set OUTPUT policy: %v", err)
-		}
-		
-		// Allow loopback
-		loopbackCmd := exec.Command("iptables", "-A", "INPUT", "-i", "lo", "-j", "ACCEPT")
-		_, err = loopbackCmd.CombinedOutput()
-		if err != nil {
-			log.Printf("WARNING: Failed to allow loopback: %v", err)
-		}
-		
-		loopbackOutCmd := exec.Command("iptables", "-A", "OUTPUT", "-o", "lo", "-j", "ACCEPT")
-		_, err = loopbackOutCmd.CombinedOutput()
-		if err != nil {
-			log.Printf("WARNING: Failed to allow loopback output: %v", err)
-		}
-		
-		// Allow established connections
-		estCmd := exec.Command("iptables", "-A", "INPUT", "-m", "state", "--state", "ESTABLISHED,RELATED", "-j", "ACCEPT")
-		_, err = estCmd.CombinedOutput()
-		if err != nil {
-			log.Printf("WARNING: Failed to allow established connections: %v", err)
-		}
-		
-		// Then add rules for allowed IPs
-		if allowedIPs != "" {
-			allowedIPList := strings.Split(allowedIPs, ",")
-			for _, ip := range allowedIPList {
-				ip = strings.TrimSpace(ip)
-				if ip == "" {
-					continue
-				}
-				
-				// Allow inbound from allowed IP
-				inCmd := exec.Command("iptables", "-A", "INPUT", "-s", ip, "-j", "ACCEPT")
-				_, err := inCmd.CombinedOutput()
-				if err != nil {
-					log.Printf("WARNING: Failed to allow input from %s: %v", ip, err)
-				}
-				
-				// Allow outbound to allowed IP
-				outCmd := exec.Command("iptables", "-A", "OUTPUT", "-d", ip, "-j", "ACCEPT")
-				_, err = outCmd.CombinedOutput()
-				if err != nil {
-					log.Printf("WARNING: Failed to allow output to %s: %v", ip, err)
-				}
+			
+			// Allow inbound connections from allowed IP
+			inCmd := exec.Command("netsh", "advfirewall", "firewall", "add", "rule", 
+				fmt.Sprintf("name=EDR-Allow-%s-In", ip), "dir=in", "action=allow", fmt.Sprintf("remoteip=%s", ip))
+			_, err := inCmd.CombinedOutput()
+			if err != nil {
+				log.Printf("WARNING: Failed to add inbound rule for %s: %v", ip, err)
+			}
+			
+			// Allow outbound connections to allowed IP
+			outCmd := exec.Command("netsh", "advfirewall", "firewall", "add", "rule", 
+				fmt.Sprintf("name=EDR-Allow-%s-Out", ip), "dir=out", "action=allow", fmt.Sprintf("remoteip=%s", ip))
+			_, err = outCmd.CombinedOutput()
+			if err != nil {
+				log.Printf("WARNING: Failed to add outbound rule for %s: %v", ip, err)
 			}
 		}
 	}
@@ -656,54 +577,32 @@ func (h *CommandHandler) handleNetworkIsolate(params map[string]string) (string,
 
 // handleNetworkRestore restores network connectivity
 func (h *CommandHandler) handleNetworkRestore(params map[string]string) (string, error) {
-	if isWindows() {
-		// Use Windows Firewall to restore
-		// Reset firewall settings
-		resetCmd := exec.Command("netsh", "advfirewall", "reset")
-		_, err := resetCmd.CombinedOutput()
-		if err != nil {
-			return "", fmt.Errorf("failed to reset firewall: %v", err)
-		}
-		
-		// Reset firewall policy
-		policyCmd := exec.Command("netsh", "advfirewall", "set", "allprofiles", "firewallpolicy", "blockinbound,allowoutbound")
-		_, err = policyCmd.CombinedOutput()
-		if err != nil {
-			return "", fmt.Errorf("failed to set firewall policy: %v", err)
-		}
-		
-		// Delete EDR firewall rules
-		deleteRulesCmd := exec.Command("cmd", "/C", "for /f \"tokens=*\" %i in ('netsh advfirewall firewall show rule name^=EDR* ^| findstr \"Rule Name:\"') do netsh advfirewall firewall delete rule name=\"%i\"")
-		_, err = deleteRulesCmd.CombinedOutput()
-		if err != nil {
-			log.Printf("WARNING: Failed to delete EDR firewall rules: %v", err)
-		}
-	} else {
-		// Use iptables on Linux
-		// Flush existing rules
-		flushCmd := exec.Command("iptables", "-F")
-		_, err := flushCmd.CombinedOutput()
-		if err != nil {
-			return "", fmt.Errorf("failed to flush iptables rules: %v", err)
-		}
-		
-		// Set default policies to ACCEPT
-		inputCmd := exec.Command("iptables", "-P", "INPUT", "ACCEPT")
-		_, err = inputCmd.CombinedOutput()
-		if err != nil {
-			return "", fmt.Errorf("failed to set INPUT policy: %v", err)
-		}
-		
-		outputCmd := exec.Command("iptables", "-P", "OUTPUT", "ACCEPT")
-		_, err = outputCmd.CombinedOutput()
-		if err != nil {
-			return "", fmt.Errorf("failed to set OUTPUT policy: %v", err)
-		}
+	// Use Windows Firewall to restore
+	// Reset firewall settings
+	resetCmd := exec.Command("netsh", "advfirewall", "reset")
+	_, err := resetCmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("failed to reset firewall: %v", err)
+	}
+	
+	// Reset firewall policy
+	policyCmd := exec.Command("netsh", "advfirewall", "set", "allprofiles", "firewallpolicy", "blockinbound,allowoutbound")
+	_, err = policyCmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("failed to set firewall policy: %v", err)
+	}
+	
+	// Delete EDR firewall rules
+	deleteRulesCmd := exec.Command("cmd", "/C", "for /f \"tokens=*\" %i in ('netsh advfirewall firewall show rule name^=EDR* ^| findstr \"Rule Name:\"') do netsh advfirewall firewall delete rule name=\"%i\"")
+	_, err = deleteRulesCmd.CombinedOutput()
+	if err != nil {
+		log.Printf("WARNING: Failed to delete EDR firewall rules: %v", err)
 	}
 
 	return "Network connectivity restored successfully", nil
 }
 
+// isWindows returns whether the current OS is Windows
 func isWindows() bool {
-	return os.PathSeparator == '\\' && os.PathListSeparator == ';'
+	return true // This is a Windows-only implementation
 } 
