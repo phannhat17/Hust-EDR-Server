@@ -177,19 +177,53 @@ func (h *CommandHandler) ReportIOCMatch(ctx context.Context, iocType pb.IOCType,
 	
 	reportID := fmt.Sprintf("%s-%d", h.client.agentID, time.Now().UnixNano())
 	
+	// Determine action taken based on the context message
+	var actionTaken pb.CommandType = pb.CommandType_UNKNOWN
+	actionSuccess := false
+	actionMessage := ""
+	
+	// Check for specific messages that indicate an action was taken
+	// For IP blocking
+	if iocType == pb.IOCType_IOC_IP && strings.Contains(matchContext, "IP automatically blocked") {
+		actionTaken = pb.CommandType_BLOCK_IP
+		actionSuccess = true
+		actionMessage = fmt.Sprintf("Successfully blocked IP %s using Windows Firewall", matchedValue)
+	}
+	
+	// For URL blocking
+	if iocType == pb.IOCType_IOC_URL && strings.Contains(matchContext, "URL blocked by adding domain") {
+		actionTaken = pb.CommandType_BLOCK_URL
+		actionSuccess = true
+		actionMessage = fmt.Sprintf("Successfully blocked URL %s", matchedValue)
+	}
+	
+	// For file deletion after hash match
+	if iocType == pb.IOCType_IOC_HASH && strings.Contains(matchContext, "Malicious file") {
+		if strings.Contains(matchContext, "deleted: true") {
+			actionTaken = pb.CommandType_DELETE_FILE
+			actionSuccess = true
+			actionMessage = "Successfully deleted malicious file"
+		}
+	}
+	
 	report := &pb.IOCMatchReport{
-		ReportId:     reportID,
-		AgentId:      h.client.agentID,
-		Timestamp:    time.Now().Unix(),
-		Type:         iocType,
-		IocValue:     iocValue,
-		MatchedValue: matchedValue,
-		Context:      matchContext,
-		Severity:     severity,
-		ActionTaken:  pb.CommandType_UNKNOWN,
+		ReportId:       reportID,
+		AgentId:        h.client.agentID,
+		Timestamp:      time.Now().Unix(),
+		Type:           iocType,
+		IocValue:       iocValue,
+		MatchedValue:   matchedValue,
+		Context:        matchContext,
+		Severity:       severity,
+		ActionTaken:    actionTaken,
+		ActionSuccess:  actionSuccess,
+		ActionMessage:  actionMessage,
 	}
 	
 	log.Printf("Reporting IOC match: %s - %s (severity: %s)", pb.IOCType_name[int32(iocType)], iocValue, severity)
+	if actionTaken != pb.CommandType_UNKNOWN {
+		log.Printf("Action reported: %s (success: %v)", pb.CommandType_name[int32(actionTaken)], actionSuccess)
+	}
 	
 	// Send report to server
 	resp, err := h.client.edrClient.ReportIOCMatch(ctx, report)
