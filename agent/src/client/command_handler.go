@@ -175,6 +175,16 @@ func (h *CommandHandler) GetIOCManager() *ioc.Manager {
 func (h *CommandHandler) ReportIOCMatch(ctx context.Context, iocType pb.IOCType, iocValue string, 
 	matchedValue string, matchContext string, severity string) error {
 	
+	// First try to send via stream if available
+	if h.client.HasActiveStream() {
+		err := h.client.ReportIOCMatchViaStream(ctx, iocType, iocValue, matchedValue, matchContext, severity)
+		if err == nil {
+			return nil // Successfully sent via stream
+		}
+		log.Printf("Failed to send IOC match via stream, falling back to RPC: %v", err)
+	}
+	
+	// Fall back to RPC if stream is not available
 	reportID := fmt.Sprintf("%s-%d", h.client.agentID, time.Now().UnixNano())
 	
 	// Determine action taken based on the context message
@@ -220,7 +230,7 @@ func (h *CommandHandler) ReportIOCMatch(ctx context.Context, iocType pb.IOCType,
 		ActionMessage:  actionMessage,
 	}
 	
-	log.Printf("Reporting IOC match: %s - %s (severity: %s)", pb.IOCType_name[int32(iocType)], iocValue, severity)
+	log.Printf("Reporting IOC match via RPC: %s - %s (severity: %s)", pb.IOCType_name[int32(iocType)], iocValue, severity)
 	if actionTaken != pb.CommandType_UNKNOWN {
 		log.Printf("Action reported: %s (success: %v)", pb.CommandType_name[int32(actionTaken)], actionSuccess)
 	}

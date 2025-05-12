@@ -19,13 +19,16 @@ const AGENT_VERSION = "1.0.1"
 
 // Command-line arguments
 var (
-	serverAddr  = flag.String("server", "localhost:50051", "Server address")
-	configFile  = flag.String("config", "config.yaml", "Configuration file")
-	logFile     = flag.String("log", "", "Log file (default: stdout)")
-	agentID     = flag.String("id", "", "Agent ID (generated if empty)")
-	dataDir     = flag.String("data", "data", "Data directory")
-	scanMinutes = flag.Int("scan-interval", 0, "IOC scan interval in minutes")
-	useTLS      = flag.Bool("tls", true, "Use TLS for server connection")
+	serverAddr     = flag.String("server", "localhost:50051", "Server address")
+	configFile     = flag.String("config", "config.yaml", "Configuration file")
+	logFile        = flag.String("log", "", "Log file (default: stdout)")
+	agentID        = flag.String("id", "", "Agent ID (generated if empty)")
+	dataDir        = flag.String("data", "data", "Data directory")
+	scanMinutes    = flag.Int("scan-interval", 0, "IOC scan interval in minutes")
+	useTLS         = flag.Bool("tls", true, "Use TLS for server connection")
+	caCertPath     = flag.String("ca-cert", "", "Path to CA certificate for server verification")
+	clientCertPath = flag.String("client-cert", "", "Path to client certificate for mTLS")
+	clientKeyPath  = flag.String("client-key", "", "Path to client key for mTLS")
 )
 
 func main() {
@@ -55,12 +58,15 @@ func main() {
 		}
 		// Use default config or command-line values if file not found
 		cfg = &config.Config{
-			ServerAddress: *serverAddr,
-			AgentID:       *agentID,
-			LogFile:       *logFile,
-			DataDir:       *dataDir,
-			Version:       AGENT_VERSION,
-			UseTLS:        *useTLS,
+			ServerAddress:  *serverAddr,
+			AgentID:        *agentID,
+			LogFile:        *logFile,
+			DataDir:        *dataDir,
+			Version:        AGENT_VERSION,
+			UseTLS:         *useTLS,
+			CACertPath:     *caCertPath,
+			ClientCertPath: *clientCertPath,
+			ClientKeyPath:  *clientKeyPath,
 		}
 		log.Printf("Using default configuration")
 	} else {
@@ -79,6 +85,15 @@ func main() {
 		if *dataDir != "data" {
 			cfg.DataDir = *dataDir
 		}
+		if *caCertPath != "" {
+			cfg.CACertPath = *caCertPath
+		}
+		if *clientCertPath != "" {
+			cfg.ClientCertPath = *clientCertPath
+		}
+		if *clientKeyPath != "" {
+			cfg.ClientKeyPath = *clientKeyPath
+		}
 		
 		// Simple approach: command line flag takes precedence over config file
 		cfg.UseTLS = *useTLS
@@ -94,7 +109,14 @@ func main() {
 	}
 
 	// Create and start the EDR client
-	edrClient, err := client.NewEDRClientWithTLS(cfg.ServerAddress, cfg.AgentID, cfg.DataDir, cfg.UseTLS)
+	edrClient, err := client.NewEDRClientWithTLS(
+		cfg.ServerAddress, 
+		cfg.AgentID, 
+		cfg.DataDir, 
+		cfg.UseTLS, 
+		cfg.CACertPath,
+		cfg.ClientCertPath,
+		cfg.ClientKeyPath)
 	if err != nil {
 		log.Fatalf("Failed to create EDR client: %v", err)
 	}
@@ -123,11 +145,9 @@ func main() {
 		}
 	}
 
-	// Start command stream
+	// Start bidirectional command stream
+	log.Printf("Starting bidirectional streaming connection")
 	go edrClient.StartCommandStream(ctx)
-
-	// Start status reporting
-	go startStatusReporting(ctx, edrClient)
 	
 	// Get command handler to access IOC functionality
 	commandHandler := edrClient.GetCommandHandler()
@@ -168,32 +188,4 @@ func main() {
 	// Allow time for cleanup
 	time.Sleep(500 * time.Millisecond)
 	log.Printf("Agent shutdown complete")
-}
-
-// startStatusReporting periodically sends status updates to the server
-func startStatusReporting(ctx context.Context, edrClient *client.EDRClient) {
-	ticker := time.NewTicker(1 * time.Minute)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ticker.C:
-			metrics := collectSystemMetrics()
-			if err := edrClient.UpdateStatus(ctx, "RUNNING", metrics); err != nil {
-				log.Printf("Failed to send status update: %v", err)
-			}
-		case <-ctx.Done():
-			return
-		}
-	}
-}
-
-// collectSystemMetrics collects system metrics
-func collectSystemMetrics() map[string]float64 {
-	// This is a simple placeholder - a real implementation would collect actual metrics
-	return map[string]float64{
-		"cpu_usage":    0.5,  // 50% CPU usage (placeholder)
-		"memory_usage": 0.25, // 25% memory usage (placeholder)
-		"uptime":       3600, // 1 hour uptime (placeholder)
-	}
 } 

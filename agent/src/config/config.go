@@ -9,13 +9,16 @@ import (
 
 // Config represents the agent configuration
 type Config struct {
-	ServerAddress string `yaml:"server_address"`
-	AgentID       string `yaml:"agent_id"`
-	LogFile       string `yaml:"log_file"`
-	DataDir       string `yaml:"data_dir"`
-	ScanInterval  int    `yaml:"scan_interval"`
-	Version       string `yaml:"version"`
-	UseTLS        bool   `yaml:"use_tls"`
+	ServerAddress   string `yaml:"server_address"`
+	AgentID         string `yaml:"agent_id"`
+	LogFile         string `yaml:"log_file"`
+	DataDir         string `yaml:"data_dir"`
+	ScanInterval    int    `yaml:"scan_interval"`
+	Version         string `yaml:"version"`
+	UseTLS          bool   `yaml:"use_tls"`
+	CACertPath      string `yaml:"ca_cert_path"`
+	ClientCertPath  string `yaml:"client_cert_path"`
+	ClientKeyPath   string `yaml:"client_key_path"`
 }
 
 // LoadConfig loads configuration from a YAML file

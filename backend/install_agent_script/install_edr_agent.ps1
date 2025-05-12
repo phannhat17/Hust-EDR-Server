@@ -3,7 +3,8 @@
 # Must be run with administrator privileges
 
 param(
-    [string]$gRPCHost = "localhost:50051"
+    [string]$gRPCHost = "localhost:50051",
+    [string]$caCertUrl = "" # URL to download CA certificate
 )
 
 # Format gRPC host - ensure it has protocol and port
@@ -16,6 +17,8 @@ $edrAgentUrl = "https://github.com/phannhat17/Hust-EDR-Server/releases/download/
 $edrDir = "C:\Program Files\Hust-EDR-Agent"
 $edrExe = "$edrDir\edr-agent.exe"
 $serviceName = "HustEDRAgent"
+$certDir = "$edrDir\cert"
+$caCertPath = "$certDir\ca.crt"
 
 # NSSM settings
 $nssmUrl = "https://nssm.cc/release/nssm-2.24.zip"
@@ -34,6 +37,12 @@ if (-not $currentPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Adm
 if (!(Test-Path $edrDir)) {
     Write-Host "Creating EDR directory: $edrDir"
     New-Item -ItemType Directory -Path $edrDir -Force | Out-Null
+}
+
+# Create certificate directory
+if (!(Test-Path $certDir)) {
+    Write-Host "Creating certificate directory: $certDir"
+    New-Item -ItemType Directory -Path $certDir -Force | Out-Null
 }
 
 # Function for faster downloads using .NET WebClient
@@ -108,6 +117,20 @@ try {
     }
 }
 
+# Download CA certificate if URL is provided
+$useTLS = $false
+if ($caCertUrl -ne "") {
+    Write-Host "Downloading CA certificate..."
+    try {
+        Download-File -Url $caCertUrl -OutputFile $caCertPath
+        $useTLS = $true
+        Write-Host "CA certificate downloaded successfully to: $caCertPath" -ForegroundColor Green
+    } catch {
+        Write-Host "Failed to download CA certificate: $_" -ForegroundColor Yellow
+        Write-Host "Will continue without TLS certificate verification" -ForegroundColor Yellow
+    }
+}
+
 # Test the executable first to make sure it works
 Write-Host "Testing EDR Agent executable..."
 $agentIdFromTest = $null
@@ -121,13 +144,24 @@ try {
     $configFilePath = "$configDir\config.yaml"
     $logFileEscaped = $logDir.Replace("\", "/") + "/edr-agent.log"
     $dataFileEscaped = $configDir.Replace("\", "/") + "/data"
-    @"
+    
+    # Build config based on whether we have a CA certificate
+    $configContent = @"
 server_address: $gRPCHost
 agent_id: ""
 log_file: "$logFileEscaped"
 data_dir: "$dataFileEscaped"
 version: "1.0.1"
-"@ | Set-Content -Path $configFilePath
+use_tls: $($useTLS.ToString().ToLower())
+"@
+
+    # Add CA certificate path if available
+    if ($useTLS) {
+        $caCertPathEscaped = $caCertPath.Replace("\", "/")
+        $configContent += "`nca_cert_path: `"$caCertPathEscaped`""
+    }
+
+    $configContent | Set-Content -Path $configFilePath
     Write-Host "Created initial config file at $configFilePath" -ForegroundColor Green
     
     # Testing connection to gRPC server
@@ -167,13 +201,24 @@ version: "1.0.1"
         # Now we have the agent ID, let's make sure our config file has it
         $logFileEscaped = $logDir.Replace("\", "/") + "/edr-agent.log"
         $dataFileEscaped = $configDir.Replace("\", "/") + "/data"
-        @"
+        
+        # Build updated config with agent ID
+        $configContent = @"
 server_address: $gRPCHost
 agent_id: "$agentIdFromTest"
 log_file: "$logFileEscaped"
 data_dir: "$dataFileEscaped"
 version: "1.0.1"
-"@ | Set-Content -Path $configFilePath
+use_tls: $($useTLS.ToString().ToLower())
+"@
+
+        # Add CA certificate path if available
+        if ($useTLS) {
+            $caCertPathEscaped = $caCertPath.Replace("\", "/")
+            $configContent += "`nca_cert_path: `"$caCertPathEscaped`""
+        }
+
+        $configContent | Set-Content -Path $configFilePath
         Write-Host "Updated config file with agent ID" -ForegroundColor Green
         Write-Host "EDR Agent executable test successful." -ForegroundColor Green
     } else {

@@ -32,6 +32,9 @@ loggers = {
     'ioc': ioc_logger
 }
 
+# Global variable to store the active servicer instance
+active_servicer = None
+
 class EDRServicer(agent_pb2_grpc.EDRServiceServicer):
     """Implementation of EDRService service."""
     
@@ -41,7 +44,7 @@ class EDRServicer(agent_pb2_grpc.EDRServiceServicer):
         # Initialize IOC manager
         self.ioc_manager = IOCManager()
         
-        # Active command streams by agent ID
+        # Active bidirectional streams by agent ID
         self.active_streams = {}
         self.stream_lock = threading.Lock()
         
@@ -174,47 +177,68 @@ class EDRServicer(agent_pb2_grpc.EDRServiceServicer):
         )
     
     def _check_ioc_update_needed(self, agent, agent_id):
-        """Check if agent needs IOC update."""
-        ioc_version_info = self.ioc_manager.get_version_info()
+        # Check if agent needs an IOC update
         current_agent_ioc_version = agent.get('ioc_version', 0)
+        ioc_version_info = self.ioc_manager.get_version_info()
         
         if current_agent_ioc_version < ioc_version_info['version']:
+            # Create and queue UPDATE_IOCS command
+            command_id = str(uuid.uuid4())
+            command = agent_pb2.Command(
+                command_id=command_id,
+                agent_id=agent_id,
+                timestamp=int(time.time() * 1000),
+                type=agent_pb2.CommandType.UPDATE_IOCS,
+                params={},
+                priority=5,  # High priority
+                timeout=30   # 30 second timeout
+            )
+            
             with self.stream_lock:
-                # Avoid duplicating UPDATE_IOCS commands
-                if agent_id in self.pending_commands and any(
-                    cmd.type == agent_pb2.CommandType.UPDATE_IOCS 
-                    for cmd in self.pending_commands[agent_id]
-                ):
-                    return
-                
-                # Create a new UPDATE_IOCS command
-                command_id = str(uuid.uuid4())
-                command = agent_pb2.Command(
-                    command_id=command_id,
-                    agent_id=agent_id,
-                    timestamp=int(time.time()),
-                    type=agent_pb2.CommandType.UPDATE_IOCS,
-                    params={},
-                    priority=1,
-                    timeout=120
-                )
-                
                 if agent_id not in self.pending_commands:
                     self.pending_commands[agent_id] = []
-                    
                 self.pending_commands[agent_id].append(command)
                 ioc_logger.info(f"Agent {agent_id} needs IOC update: {current_agent_ioc_version} < {ioc_version_info['version']}")
     
-    def ReceiveCommands(self, request, context):
-        """Stream commands to agent."""
-        agent_id = request.agent_id
+    def CommandStream(self, request_iterator, context):
+        """Bidirectional stream for commands and results.
         
-        with PerformanceLogger("receive_commands", {"agent_id": agent_id}):
-            conn_logger.info(f"Command stream opened for agent {agent_id}")
-            
-            last_command_time = 0
-            last_status_update = 0
-            status_update_interval = 60  # seconds
+        This is the bidirectional streaming implementation that handles
+        both command distribution and result collection in a single stream.
+        """
+        agent_id = None
+        conn_logger.info(f"Bidirectional command stream opened from {context.peer()}")
+        
+        # Track the stream so we can manage it independently
+        stream_active = True
+        
+        # Track when we last received a message from the agent
+        last_activity_time = int(time.time())
+        last_command_time = 0
+        last_heartbeat_time = 0
+        heartbeat_interval = 60  # seconds
+
+        try:
+            # Process the first message to get agent ID
+            try:
+                first_message = next(request_iterator)
+                if hasattr(first_message, 'payload'):
+                    if first_message.HasField('ping'):
+                        agent_id = first_message.ping.agent_id
+                        last_activity_time = first_message.ping.timestamp
+                        conn_logger.info(f"Bidirectional stream identified agent {agent_id} via ping")
+                    elif first_message.HasField('result'):
+                        agent_id = first_message.result.agent_id
+                        conn_logger.info(f"Bidirectional stream identified agent {agent_id} via result")
+                    else:
+                        conn_logger.warning(f"Unexpected first message type in bidirectional stream")
+                        return
+                else:
+                    conn_logger.warning(f"Invalid first message format in bidirectional stream")
+                    return
+            except StopIteration:
+                conn_logger.warning(f"Bidirectional stream ended before first message")
+                return
             
             # Get or auto-register agent
             agent = self.storage.get_agent(agent_id)
@@ -233,215 +257,357 @@ class EDRServicer(agent_pb2_grpc.EDRServiceServicer):
                     'ioc_version': 0
                 }
                 self.storage.save_agent(agent_id, agent)
-                last_status_update = int(time.time())
-                logger.info(f"Auto-registering unknown agent: {agent_id}")
+                logger.info(f"Auto-registering unknown agent in bidirectional stream: {agent_id}")
             
-            # Register stream
+            # Register stream in active_streams for command distribution
             with self.stream_lock:
                 self.active_streams[agent_id] = context
-                conn_logger.debug(f"Registered command stream for agent {agent_id}")
+                conn_logger.debug(f"Registered bidirectional command stream for agent {agent_id}")
             
             # Initial IOC check
             self._check_ioc_update_needed(agent, agent_id)
             
-            # Stream commands
-            try:
-                check_counter = 0
-                while context.is_active():
-                    current_time = int(time.time())
-                    check_counter += 1
-                    
-                    # Update agent status periodically
-                    if current_time - last_status_update >= status_update_interval:
-                        agent['last_seen'] = current_time
-                        agent['status'] = 'ONLINE'
-                        self.storage.save_agent(agent_id, agent)
-                        last_status_update = current_time
-                        debug_logger.debug(f"Updated agent {agent_id} status")
-                    
-                    # Periodic IOC check
-                    if check_counter % 60 == 0:
-                        self._check_ioc_update_needed(agent, agent_id)
-                    
-                    # Process pending commands
-                    with self.stream_lock:
-                        pending = self.pending_commands.get(agent_id, [])
-                        if pending:
-                            # Sort by priority/timestamp
-                            pending.sort(key=lambda cmd: cmd.timestamp, reverse=True)
-                            debug_logger.info(f"Found {len(pending)} pending commands for agent {agent_id}")
+            # Set up thread for processing incoming messages
+            def process_incoming_messages():
+                nonlocal stream_active, last_activity_time
+                
+                try:
+                    for message in request_iterator:
+                        if not stream_active:
+                            break
                             
-                            sent_command_ids = []
-                            for command in pending:
-                                if command.timestamp > last_command_time:
-                                    cmd_type_name = agent_pb2.CommandType.Name(command.type)
-                                    logger.info(f"Sending command {command.command_id} (Type: {cmd_type_name}) to agent {agent_id}")
+                        # Update last activity time
+                        last_activity_time = int(time.time())
+                        
+                        # Process incoming message based on type
+                        if message.HasField('ping'):
+                            # Update last activity time and agent status
+                            ping = message.ping
+                            debug_logger.debug(f"Received heartbeat from agent {agent_id}")
+                            
+                            # Update agent status
+                            agent['last_seen'] = current_time = int(time.time())
+                            agent['status'] = 'ONLINE'
+                            self.storage.save_agent(agent_id, agent)
+                            
+                        elif message.HasField('result'):
+                            # Process command result
+                            result = message.result
+                            command_id = result.command_id
+                            
+                            # Log result
+                            log_fn = logger.info if result.success else logger.warning
+                            log_fn(f"Command result from {agent_id}: {command_id} - Success: {result.success}, Duration: {result.duration_ms}ms")
+                            
+                            # Store result (similar to ReportCommandResult)
+                            is_ioc_related = False
+                            if "IOC update available" in result.message or "No IOC update available" in result.message:
+                                is_ioc_related = True
+                            
+                            # Check by command type in pending commands
+                            if not is_ioc_related:
+                                for cmds in self.pending_commands.values():
+                                    for cmd in cmds:
+                                        if cmd.command_id == command_id and cmd.type == agent_pb2.CommandType.UPDATE_IOCS:
+                                            is_ioc_related = True
+                                            break
+                                    if is_ioc_related:
+                                        break
+                            
+                            # Update agent's IOC version if this was a successful IOC update
+                            if is_ioc_related and "IOC update available" in result.message and result.success:
+                                agent = self.storage.get_agent(agent_id)
+                                if agent:
+                                    agent['ioc_version'] = self.ioc_manager.get_version_info()['version']
+                                    self.storage.save_agent(agent_id, agent)
+                                    logger.info(f"Updated agent {agent_id} IOC version to {agent['ioc_version']}")
+                            
+                            # Store result only if not IOC related
+                            if not is_ioc_related:
+                                with self.results_lock:
+                                    result_dict = {
+                                        'command_id': result.command_id,
+                                        'agent_id': result.agent_id,
+                                        'success': result.success,
+                                        'message': result.message,
+                                        'execution_time': result.execution_time,
+                                        'duration_ms': result.duration_ms
+                                    }
                                     
-                                    # Log command details
-                                    if command.type == agent_pb2.CommandType.DELETE_FILE and 'path' not in command.params:
-                                        logger.warning(f"DELETE_FILE command missing required 'path' parameter")
-                                    
-                                    yield command
+                                    self.command_results[command_id] = result_dict
+                                    self.save_command_results()
+                            
+                            # Remove from pending if present
+                            with self.stream_lock:
+                                if agent_id in self.pending_commands:
+                                    self.pending_commands[agent_id] = [
+                                        cmd for cmd in self.pending_commands[agent_id] 
+                                        if cmd.command_id != command_id
+                                    ]
+                        
+                        elif message.HasField('status'):
+                            # Process status update
+                            status = message.status
+                            logger.info(f"Status update from agent {agent_id} via stream: {status.status}")
+                            
+                            # Update agent status
+                            agent.update({
+                                'last_seen': status.timestamp,
+                                'status': status.status
+                            })
+                            
+                            # Update metrics if provided
+                            if status.system_metrics:
+                                agent.update({
+                                    'cpu_usage': status.system_metrics.cpu_usage,
+                                    'memory_usage': status.system_metrics.memory_usage,
+                                    'uptime': status.system_metrics.uptime
+                                })
+                            
+                            self.storage.save_agent(agent_id, agent)
+                            debug_logger.debug(f"Updated agent {agent_id} status from stream")
+                        
+                        elif message.HasField('ioc_match'):
+                            # Process IOC match report
+                            report = message.ioc_match
+                            report_id = report.report_id
+                            
+                            # Log match details
+                            logger.info(f"IOC match from agent {agent_id} via stream: {agent_pb2.IOCType.Name(report.type)} - {report.ioc_value}")
+                            debug_logger.info(f"Match details: {report.matched_value}, Severity: {report.severity}")
+                            
+                            if report.action_taken != agent_pb2.CommandType.UNKNOWN:
+                                action_name = agent_pb2.CommandType.Name(report.action_taken)
+                                logger.info(f"Action taken: {action_name} - Success: {report.action_success}")
+                            
+                            # Store the match report
+                            match_data = {
+                                'report_id': report_id,
+                                'agent_id': agent_id,
+                                'timestamp': report.timestamp,
+                                'type': agent_pb2.IOCType.Name(report.type),
+                                'ioc_value': report.ioc_value,
+                                'matched_value': report.matched_value,
+                                'context': report.context,
+                                'severity': report.severity,
+                                'action_taken': agent_pb2.CommandType.Name(report.action_taken) if report.action_taken != agent_pb2.CommandType.UNKNOWN else None,
+                                'action_success': report.action_success,
+                                'action_message': report.action_message,
+                                'server_received': int(time.time())
+                            }
+                            
+                            self.storage.save_ioc_match(report_id, match_data)
+                            
+                            # Update agent with latest alert information
+                            agent = self.storage.get_agent(agent_id)
+                            if agent:
+                                agent['last_ioc_match'] = {
+                                    'timestamp': report.timestamp,
+                                    'type': agent_pb2.IOCType.Name(report.type),
+                                    'ioc_value': report.ioc_value,
+                                    'severity': report.severity
+                                }
+                                self.storage.save_agent(agent_id, agent)
+                            
+                            # Send acknowledgment
+                            try:
+                                # Create base acknowledgment
+                                ack = agent_pb2.IOCMatchAck(
+                                    report_id=report_id,
+                                    received=True,
+                                    message="IOC match report received"
+                                )
+                                
+                                # Check if additional action is needed based on IOC severity or type
+                                # This is where you could implement automatic response policies
+                                # For now, we're not implementing any automatic actions
+                                
+                                # Create message with IOC ack payload
+                                ack_msg = agent_pb2.CommandMessage(
+                                    ioc_ack=ack
+                                )
+                                
+                                # Send the acknowledgment
+                                yield ack_msg
+                                logger.debug(f"Sent IOC match acknowledgment for report {report_id}")
+                            except Exception as e:
+                                logger.error(f"Failed to send IOC match acknowledgment: {e}")
+                            
+                        else:
+                            logger.warning(f"Received unknown message type from agent {agent_id}")
+                except Exception as e:
+                    logger.error(f"Error processing bidirectional stream messages: {e}")
+                    stream_active = False
+            
+            # Start a thread to process incoming messages
+            message_thread = threading.Thread(target=process_incoming_messages)
+            message_thread.daemon = True
+            message_thread.start()
+            
+            # Main loop - send commands and heartbeats
+            check_counter = 0
+            while context.is_active() and stream_active:
+                current_time = int(time.time())
+                check_counter += 1
+                
+                # Check for inactive stream
+                if current_time - last_activity_time > 180:  # 3 minutes without any message
+                    logger.warning(f"Bidirectional stream for agent {agent_id} inactive for too long, closing")
+                    stream_active = False
+                    break
+                
+                # Send periodic heartbeat
+                if current_time - last_heartbeat_time > heartbeat_interval:
+                    try:
+                        ping_message = agent_pb2.CommandMessage(
+                            ping=agent_pb2.PingMessage(
+                                agent_id="server",
+                                timestamp=current_time
+                            )
+                        )
+                        yield ping_message
+                        last_heartbeat_time = current_time
+                        debug_logger.debug(f"Sent heartbeat to agent {agent_id}")
+                    except Exception as e:
+                        logger.error(f"Error sending heartbeat to agent {agent_id}: {e}")
+                        stream_active = False
+                        break
+                
+                # Periodic IOC check (every ~15 seconds)
+                if check_counter % 30 == 0:
+                    self._check_ioc_update_needed(agent, agent_id)
+                
+                # Process pending commands
+                with self.stream_lock:
+                    pending = self.pending_commands.get(agent_id, [])
+                    if pending:
+                        # Sort by priority/timestamp
+                        pending.sort(key=lambda cmd: cmd.timestamp, reverse=True)
+                        debug_logger.info(f"Found {len(pending)} pending commands for agent {agent_id}")
+                        
+                        sent_command_ids = []
+                        for command in pending:
+                            if command.timestamp > last_command_time:
+                                cmd_type_name = agent_pb2.CommandType.Name(command.type)
+                                logger.info(f"Sending command {command.command_id} (Type: {cmd_type_name}) to agent {agent_id}")
+                                
+                                # Create command message
+                                try:
+                                    command_message = agent_pb2.CommandMessage(
+                                        command=command
+                                    )
+                                    yield command_message
                                     last_command_time = max(last_command_time, command.timestamp)
                                     sent_command_ids.append(command.command_id)
-                            
-                            # Remove sent commands
-                            if sent_command_ids:
-                                self.pending_commands[agent_id] = [
-                                    cmd for cmd in pending if cmd.command_id not in sent_command_ids
-                                ]
-                    
-                    time.sleep(0.05)
-                    
-            except Exception as e:
-                logger.warning(f"Command stream for agent {agent_id} ended: {e}")
-            finally:
-                # Update agent status and cleanup
+                                except Exception as e:
+                                    logger.error(f"Error sending command to agent {agent_id}: {e}")
+                                    stream_active = False
+                                    break
+                        
+                        # Remove sent commands
+                        if sent_command_ids:
+                            self.pending_commands[agent_id] = [
+                                cmd for cmd in pending if cmd.command_id not in sent_command_ids
+                            ]
+                
+                time.sleep(0.5)  # Slower check interval than legacy stream
+                
+        except Exception as e:
+            logger.warning(f"Bidirectional command stream for agent {agent_id} ended: {e}")
+        finally:
+            # Update agent status and cleanup
+            if agent_id:
                 agent['last_seen'] = int(time.time())
                 agent['status'] = 'OFFLINE'
                 self.storage.save_agent(agent_id, agent)
                 
                 with self.stream_lock:
-                    if agent_id in self.active_streams and self.active_streams[agent_id] == context:
+                    if agent_id in self.active_streams:
                         del self.active_streams[agent_id]
-                        conn_logger.debug(f"Unregistered command stream for agent {agent_id}")
-    
-    def ReportCommandResult(self, request, context):
-        """Handle command result from agent."""
-        command_id = request.command_id
-        agent_id = request.agent_id
-        
-        # Log result
-        log_fn = logger.info if request.success else logger.warning
-        log_fn(f"Command result from {agent_id}: {command_id} - Success: {request.success}, Duration: {request.duration_ms}ms")
-        
-        # Don't store IOC update related commands in command_results
-        is_ioc_related = False
-        
-        # Check by command message
-        if "IOC update available" in request.message or "No IOC update available" in request.message:
-            is_ioc_related = True
-            logger.debug(f"Skipping IOC update result storage: {request.message}")
-        
-        # Check by command type in pending commands
-        if not is_ioc_related:
-            for cmds in self.pending_commands.values():
-                for cmd in cmds:
-                    if cmd.command_id == command_id and cmd.type == agent_pb2.CommandType.UPDATE_IOCS:
-                        is_ioc_related = True
-                        logger.debug(f"Skipping IOC update command result storage by command type")
-                        break
-                if is_ioc_related:
-                    break
-        
-        # Update agent's IOC version if this was a successful IOC update
-        if is_ioc_related and "IOC update available" in request.message and request.success:
-            agent = self.storage.get_agent(agent_id)
-            if agent:
-                agent['ioc_version'] = self.ioc_manager.get_version_info()['version']
-                self.storage.save_agent(agent_id, agent)
-                logger.info(f"Updated agent {agent_id} IOC version to {agent['ioc_version']}")
-        
-        # Store result only if not IOC related
-        if not is_ioc_related:
-            with self.results_lock:
-                result_dict = {
-                    'command_id': request.command_id,
-                    'agent_id': request.agent_id,
-                    'success': request.success,
-                    'message': request.message,
-                    'execution_time': request.execution_time,
-                    'duration_ms': request.duration_ms
-                }
-                
-                self.command_results[command_id] = result_dict
-                self.save_command_results()
-        
-        # Remove from pending if present
-        with self.stream_lock:
-            if agent_id in self.pending_commands:
-                self.pending_commands[agent_id] = [
-                    cmd for cmd in self.pending_commands[agent_id] 
-                    if cmd.command_id != command_id
-                ]
-        
-        return agent_pb2.CommandAck(
-            command_id=command_id,
-            received=True,
-            message="Result received"
-        )
+                        conn_logger.debug(f"Unregistered bidirectional command stream for agent {agent_id}")
     
     def SendCommand(self, request, context):
-        """Send a command to an agent synchronously and wait for results."""
-        try:
-            command = request.command
-            agent_id = command.agent_id
-            cmd_type_name = agent_pb2.CommandType.Name(command.type)
+        """Create and queue a command for an agent."""
+        command_id = str(uuid.uuid4())
+        agent_id = request.agent_id
+        command_type = request.command_type
+        params = request.params
+        
+        logger.info(f"Creating command: Type={agent_pb2.CommandType.Name(command_type)}, Agent={agent_id}")
+        
+        # Validate agent
+        agent = self.storage.get_agent(agent_id)
+        if not agent:
+            return {
+                'success': False,
+                'message': f"Agent with ID {agent_id} does not exist",
+                'command_id': command_id
+            }
+        
+        # Validate command params based on type
+        if command_type == agent_pb2.CommandType.DELETE_FILE and 'path' not in params:
+            return {
+                'success': False,
+                'message': "DELETE_FILE command missing required 'path' parameter",
+                'command_id': command_id
+            }
+        
+        # Check if agent is reachable
+        current_time = int(time.time())
+        agent_online = (current_time - agent.get('last_seen', 0)) < 300  # 5 minutes
+        
+        if not agent_online:
+            return {
+                'success': False,
+                'message': f"Agent {agent_id} is offline. Cannot send command.",
+                'command_id': command_id
+            }
+        
+        # Check for active stream
+        with self.stream_lock:
+            if agent_id not in self.active_streams:
+                return {
+                    'success': False,
+                    'message': f"Agent {agent_id} is online but has no active command stream.",
+                    'command_id': command_id
+                }
             
-            # Validate agent
-            agent = self.storage.get_agent(agent_id)
-            if not agent:
-                return agent_pb2.SendCommandResponse(
-                    success=False, 
-                    message=f"Agent with ID {agent_id} does not exist"
-                )
-            
-            logger.info(f"Sending command: ID={command.command_id}, Type={cmd_type_name}, Agent={agent_id}")
-            
-            # Validate command params
-            if command.type == agent_pb2.CommandType.DELETE_FILE and 'path' not in command.params:
-                return agent_pb2.SendCommandResponse(
-                    success=False, 
-                    message="DELETE_FILE command missing required 'path' parameter"
-                )
-            
-            # Check if agent is reachable
-            current_time = int(time.time())
-            agent_online = (current_time - agent.get('last_seen', 0)) < 300  # 5 minutes
-            
-            if not agent_online:
-                return agent_pb2.SendCommandResponse(
-                    success=False, 
-                    message=f"Agent {agent_id} is offline. Cannot send command directly."
-                )
-            
-            # Check for active stream
-            with self.stream_lock:
-                stream_active = agent_id in self.active_streams and self.active_streams[agent_id] is not None
-                if not stream_active:
-                    return agent_pb2.SendCommandResponse(
-                        success=False, 
-                        message=f"Agent {agent_id} is online but has no active command stream."
-                    )
-                
-                # Add command to queue
-                command.timestamp = int(time.time() * 1000)
-                if agent_id not in self.pending_commands:
-                    self.pending_commands[agent_id] = []
-                self.pending_commands[agent_id].append(command)
-            
-            # Wait for result
-            start_time = time.time()
-            timeout = 10  # seconds
-            while (time.time() - start_time) < timeout:
-                with self.results_lock:
-                    if command.command_id in self.command_results:
-                        result = self.command_results[command.command_id]
-                        return agent_pb2.SendCommandResponse(
-                            success=result.get('success', False),
-                            message=f"Command {'succeeded' if result.get('success', False) else 'failed'} in {result.get('duration_ms', 0)}ms: {result.get('message', '')}"
-                        )
-                
-                time.sleep(0.1)
-            
-            return agent_pb2.SendCommandResponse(
-                success=False,
-                message=f"Command execution timed out after {timeout} seconds."
+            # Create the command
+            command = agent_pb2.Command(
+                command_id=command_id,
+                agent_id=agent_id,
+                timestamp=int(time.time() * 1000),
+                type=command_type,
+                params=params,
+                priority=1,
+                timeout=60
             )
             
-        except Exception as e:
-            logger.error(f"Error in SendCommand: {e}")
-            return agent_pb2.SendCommandResponse(success=False, message=str(e))
+            # Add command to queue
+            if agent_id not in self.pending_commands:
+                self.pending_commands[agent_id] = []
+            self.pending_commands[agent_id].append(command)
+        
+        # Wait for result
+        start_time = time.time()
+        timeout = 10  # seconds
+        while (time.time() - start_time) < timeout:
+            with self.results_lock:
+                if command_id in self.command_results:
+                    result = self.command_results[command_id]
+                    return {
+                        'success': result.get('success', False),
+                        'message': result.get('message', ''),
+                        'command_id': command_id
+                    }
+            
+            time.sleep(0.1)
+        
+        return {
+            'success': False,
+            'message': f"Command execution timed out after {timeout} seconds.",
+            'command_id': command_id
+        }
     
     def GetIOCs(self, request, context):
         """Handle IOC request from agent."""
@@ -582,6 +748,8 @@ def start_grpc_server(port=None, use_tls=None):
     Returns:
         tuple: The running server instance and servicer
     """
+    global active_servicer
+    
     if port is None:
         port = config.GRPC_PORT
     
@@ -592,11 +760,16 @@ def start_grpc_server(port=None, use_tls=None):
     servicer = EDRServicer()
     agent_pb2_grpc.add_EDRServiceServicer_to_server(servicer, server)
     
+    # Store the active servicer for direct access
+    active_servicer = servicer
+    
     # Configure TLS if enabled
     if use_tls:
         # Check for certificate files
         server_key_path = config.GRPC_SERVER_KEY
         server_cert_path = config.GRPC_SERVER_CERT
+        ca_cert_path = getattr(config, 'GRPC_CA_CERT', None)
+        use_mtls = getattr(config, 'GRPC_USE_MTLS', False)
         
         # Make sure the certificates exist
         if not all(os.path.exists(f) for f in [server_key_path, server_cert_path]):
@@ -611,14 +784,28 @@ def start_grpc_server(port=None, use_tls=None):
             with open(server_cert_path, 'rb') as f:
                 server_cert = f.read()
             
-            # Create server credentials
-            server_credentials = grpc.ssl_server_credentials(
-                [(server_key, server_cert)]
-            )
+            # Create server credentials - handle mTLS option
+            if use_mtls and ca_cert_path and os.path.exists(ca_cert_path):
+                # Read CA cert for client verification
+                with open(ca_cert_path, 'rb') as f:
+                    ca_cert = f.read()
+                    
+                # Create server credentials with client certificate verification
+                server_credentials = grpc.ssl_server_credentials(
+                    [(server_key, server_cert)],
+                    root_certificates=ca_cert,
+                    require_client_auth=True
+                )
+                logger.info(f"EDR gRPC server started with mTLS (mutual authentication) on port {port}")
+            else:
+                # Create server credentials without client verification
+                server_credentials = grpc.ssl_server_credentials(
+                    [(server_key, server_cert)]
+                )
+                logger.info(f"EDR gRPC server started with TLS encryption on port {port}")
             
             # Add secure port
             server.add_secure_port(f'[::]:{port}', server_credentials)
-            logger.info(f"EDR gRPC server started with TLS encryption on port {port}")
     else:
         # Start server without TLS
         server.add_insecure_port(f'[::]:{port}')
