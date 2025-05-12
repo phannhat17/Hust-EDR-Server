@@ -6,7 +6,7 @@ import uuid
 import grpc
 from flask import Blueprint, jsonify, request, current_app
 from app.grpc import agent_pb2, agent_pb2_grpc
-
+from app.config.config import config
 # Set up logger
 logger = logging.getLogger(__name__)
 
@@ -15,7 +15,22 @@ commands_bp = Blueprint('commands', __name__, url_prefix='/api/commands')
 
 def create_grpc_client():
     """Create a gRPC client for command services."""
-    channel = grpc.insecure_channel('localhost:50051')
+    # Path to the server certificate
+    cert_path = config.GRPC_SERVER_CERT
+    
+    if os.path.exists(cert_path):
+        with open(cert_path, 'rb') as f:
+            server_cert = f.read()
+        
+        # Create SSL credentials with the server certificate
+        creds = grpc.ssl_channel_credentials(root_certificates=server_cert)
+        channel = grpc.secure_channel('localhost:50051', creds)
+        logger.info("Created secure gRPC channel with server certificate")
+    else:
+        # Fall back to insecure channel if certificate not found
+        logger.warning(f"Server certificate not found at {cert_path}, using insecure channel")
+        channel = grpc.insecure_channel('localhost:50051')
+    
     return agent_pb2_grpc.EDRServiceStub(channel)
 
 @commands_bp.route('', methods=['GET'])
