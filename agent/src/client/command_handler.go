@@ -19,16 +19,22 @@ import (
 type CommandHandler struct {
 	client *EDRClient
 	iocManager *ioc.Manager
+	scanner    *ioc.Scanner
 }
 
 // NewCommandHandler creates a new command handler
 func NewCommandHandler(client *EDRClient) *CommandHandler {
-	// Use the data directory from the client's configuration
-	iocsPath := filepath.Join(client.dataDir, "iocs")
+	// Create IOC manager
+	iocManager := ioc.NewManager(filepath.Join(client.dataDir, "iocs"))
+	
+	// Load existing IOCs
+	if err := iocManager.LoadFromFile(); err != nil {
+		log.Printf("Warning: failed to load IOCs: %v", err)
+	}
 	
 	return &CommandHandler{
-		client: client,
-		iocManager: ioc.NewManager(iocsPath),
+		client:     client,
+		iocManager: iocManager,
 	}
 }
 
@@ -169,6 +175,21 @@ func (h *CommandHandler) handleUpdateIOCs(ctx context.Context) (string, error) {
 // GetIOCManager returns the IOC manager instance
 func (h *CommandHandler) GetIOCManager() *ioc.Manager {
 	return h.iocManager
+}
+
+// SetScanner sets the IOC scanner instance
+func (h *CommandHandler) SetScanner(scanner *ioc.Scanner) {
+	h.scanner = scanner
+}
+
+// GetScanner returns the IOC scanner instance
+func (h *CommandHandler) GetScanner() *ioc.Scanner {
+	return h.scanner
+}
+
+// UpdateIOCs updates the IOC database from the server
+func (h *CommandHandler) UpdateIOCs(ctx context.Context) (string, error) {
+	return h.handleUpdateIOCs(ctx)
 }
 
 // ReportIOCMatch sends an IOC match report to the server

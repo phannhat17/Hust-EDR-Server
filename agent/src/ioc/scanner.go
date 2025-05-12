@@ -31,6 +31,7 @@ type Scanner struct {
 	cancel          context.CancelFunc
 	networkBlocker  *NetworkBlocker
 	sysmonLogPath   string
+	triggerScan     chan struct{}
 }
 
 // NetworkBlocker handles blocking of malicious IPs and URLs
@@ -139,6 +140,7 @@ func NewScanner(manager *Manager, reportCallback func(context.Context, pb.IOCTyp
 		cancel:          cancel,
 		networkBlocker:  NewNetworkBlocker(manager.StoragePath),
 		sysmonLogPath:   sysmonLogPath,
+		triggerScan:     make(chan struct{}, 1),
 	}
 }
 
@@ -171,12 +173,30 @@ func (s *Scanner) Start() {
 			select {
 			case <-ticker.C:
 				go s.runScan()
+			case <-s.triggerScan:
+				// Perform immediate scan
+				log.Printf("Triggering immediate IOC scan")
+				go s.runScan()
+				
+				// Reset the timer
+				ticker.Reset(time.Duration(interval) * time.Minute)
 			case <-s.ctx.Done():
 				log.Printf("IOC scanner stopped")
 				return
 			}
 		}
 	}()
+}
+
+// TriggerScan triggers an immediate scan and resets the timer
+func (s *Scanner) TriggerScan() {
+	// Use non-blocking send to avoid hanging if channel is full
+	select {
+	case s.triggerScan <- struct{}{}:
+		log.Printf("IOC scan triggered")
+	default:
+		log.Printf("Scan already triggered, waiting for completion")
+	}
 }
 
 // Stop stops the scanner

@@ -25,14 +25,15 @@ func init() {
 
 // EDRClient represents a client for communicating with the EDR server
 type EDRClient struct {
-	serverAddress string
-	agentID       string
-	conn          *grpc.ClientConn
-	edrClient     pb.EDRServiceClient
-	cmdHandler    *CommandHandler
-	agentVersion  string
-	dataDir       string
-	useTLS        bool
+	serverAddress   string
+	agentID         string
+	conn            *grpc.ClientConn
+	edrClient       pb.EDRServiceClient
+	cmdHandler      *CommandHandler
+	agentVersion    string
+	dataDir         string
+	useTLS          bool
+	metricsInterval int
 }
 
 // NewEDRClient creates a new EDR client
@@ -87,6 +88,15 @@ func NewEDRClientWithTLS(serverAddress, agentID string, dataDir string, useTLS b
 // SetAgentVersion sets the agent version
 func (c *EDRClient) SetAgentVersion(version string) {
 	c.agentVersion = version
+}
+
+// SetMetricsInterval sets the system metrics update interval in minutes
+func (c *EDRClient) SetMetricsInterval(interval int) {
+	if interval <= 0 {
+		c.metricsInterval = 2 // Default to 2 minutes
+	} else {
+		c.metricsInterval = interval
+	}
 }
 
 // Register registers the agent with the server
@@ -306,6 +316,17 @@ func (c *EDRClient) StartCommandStream(ctx context.Context) {
 								if err := stream.Send(resultMsg); err != nil {
 									log.Printf("Failed to send command result: %v", err)
 								}
+								
+								// If this was an UPDATE_IOCS command and it was successful, trigger an IOC scan immediately
+								if command.Type == pb.CommandType_UPDATE_IOCS && result.Success {
+									log.Printf("IOCs updated successfully, triggering immediate scan")
+									scanner := c.cmdHandler.GetScanner()
+									if scanner != nil {
+										go scanner.TriggerScan()
+									} else {
+										log.Printf("WARNING: Cannot trigger IOC scan, scanner not available")
+									}
+								}
 							}
 						}(cmd)
 					}
@@ -317,8 +338,8 @@ func (c *EDRClient) StartCommandStream(ctx context.Context) {
 			go func() {
 				defer wg.Done()
 				
-				// Changed from 2 minutes to 15 seconds for faster status updates
-				statusTicker := time.NewTicker(15 * time.Second)
+				// Use the metrics interval from config (in minutes)
+				statusTicker := time.NewTicker(time.Duration(c.metricsInterval) * time.Minute)
 				defer statusTicker.Stop()
 				
 				// Send an initial status update immediately

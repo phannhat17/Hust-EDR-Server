@@ -101,6 +101,9 @@ func main() {
 	
 	// Set the agent version
 	edrClient.SetAgentVersion(cfg.Version)
+	
+	// Set metrics interval
+	edrClient.SetMetricsInterval(cfg.MetricsInterval)
 
 	// Start agent connection
 	ctx, cancel := context.WithCancel(context.Background())
@@ -122,13 +125,22 @@ func main() {
 			log.Printf("Updated configuration with assigned agent ID")
 		}
 	}
+	
+	// Get command handler to access IOC functionality
+	commandHandler := edrClient.GetCommandHandler()
+	
+	// Update IOCs from server on startup
+	log.Printf("Checking for IOC updates on startup...")
+	result, err := commandHandler.UpdateIOCs(ctx)
+	if err != nil {
+		log.Printf("Warning: failed to update IOCs on startup: %v", err)
+	} else {
+		log.Printf("IOC update on startup: %s", result)
+	}
 
 	// Start bidirectional command stream
 	log.Printf("Starting with bidirectional gRPC streaming")
 	go edrClient.StartCommandStream(ctx)
-	
-	// Get command handler to access IOC functionality
-	commandHandler := edrClient.GetCommandHandler()
 	
 	// Use config scan interval if command-line flag wasn't explicitly set
 	intervalMinutes := *scanMinutes
@@ -143,6 +155,9 @@ func main() {
 		commandHandler.ReportIOCMatch,
 		intervalMinutes,
 	)
+	
+	// Set scanner in command handler
+	commandHandler.SetScanner(scanner)
 	
 	// Start IOC scanning
 	scanner.Start()
