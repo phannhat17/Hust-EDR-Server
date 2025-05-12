@@ -8,11 +8,11 @@ import json
 import logging
 import hashlib
 import time
-import uuid
 from datetime import datetime
 from pathlib import Path
 
 from app.config.config import config
+from app.utils.agent_commands import get_online_agents, send_update_iocs_command
 
 # Configure logging
 logger = logging.getLogger('app.iocs')
@@ -89,6 +89,9 @@ class IOCManager:
         self._save_version()
         
         logger.info(f"Saved {self._count_iocs()} IOCs to storage (version {self.version['version']})")
+        
+        # Notify agents of IOC update
+        self.notify_agents_of_update()
     
     def _save_version(self):
         """Save version information to file."""
@@ -377,4 +380,31 @@ class IOCManager:
         elif hash_type == 'sha256':
             return len(file_hash) == 64 and all(c in '0123456789abcdefABCDEF' for c in file_hash)
         else:
-            return False 
+            return False
+    
+    def notify_agents_of_update(self):
+        """Notify all online agents of IOC updates."""
+        try:
+            # Get list of online agents
+            online_agents = get_online_agents()
+            
+            if not online_agents:
+                logger.info("No online agents to notify of IOC update")
+                return
+            
+            # Send IOC update command to each online agent
+            success_count = 0
+            for agent_id in online_agents:
+                success, message, command_id = send_update_iocs_command(agent_id)
+                
+                if success:
+                    logger.info(f"Sent IOC update command to agent {agent_id}")
+                    success_count += 1
+                else:
+                    logger.warning(f"Failed to send IOC update command to agent {agent_id}: {message}")
+            
+            logger.info(f"Notified {success_count}/{len(online_agents)} agents of IOC update")
+                
+        except Exception as e:
+            logger.error(f"Failed to notify agents of IOC update: {e}")
+            return 
