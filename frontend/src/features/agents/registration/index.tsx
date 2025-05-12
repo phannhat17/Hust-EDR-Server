@@ -156,9 +156,9 @@ export default function AgentRegistration() {
                             {installCommand}
                           </pre>
                           <Button 
-                            variant="ghost" 
+                            variant="default" 
                             size="icon" 
-                            className="absolute top-2 right-2 hover:bg-muted-foreground/20" 
+                            className="absolute top-2 right-2 shadow-sm" 
                             onClick={() => copyToClipboard(installCommand, "Installation command copied to clipboard")}
                             title="Copy installation command"
                             aria-label="Copy installation command"

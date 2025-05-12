@@ -44,7 +44,7 @@ function getSeverityBadge(severity: SeverityLevel | string) {
     
   switch (severity.toLowerCase()) {
     case 'critical':
-      return <Badge variant="destructive">Critical</Badge>
+      return <Badge variant="black">Critical</Badge>
     case 'high':
       return <Badge variant="destructive">High</Badge>
     case 'medium':

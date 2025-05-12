@@ -185,7 +185,7 @@ function IOCsPage() {
       case 'high':
         return <Badge variant="destructive">High</Badge>
       case 'critical':
-        return <Badge variant="destructive">Critical</Badge>
+        return <Badge variant="black">Critical</Badge>
       default:
         return <Badge variant="outline">{capitalized}</Badge>
     }
