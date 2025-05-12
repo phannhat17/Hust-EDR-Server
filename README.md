@@ -88,7 +88,7 @@ A comprehensive Endpoint Detection and Response (EDR) system consisting of a ser
 
 3. Run agent:
    ```bash
-   edr-agent.exe -host="IP:PORT"
+   edr-agent.exe -server="IP:PORT"
    ```
 
 ## License
