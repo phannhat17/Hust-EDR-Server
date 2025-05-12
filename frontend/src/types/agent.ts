@@ -172,4 +172,13 @@ export function isAgentOnline(lastSeen: string | number): boolean {
   const now = Date.now();
   // Consider online if seen in the last 5 minutes
   return now - lastSeenTime < 5 * 60 * 1000;
+}
+
+/**
+ * Format agent CPU/memory metric to display as percentage
+ * This multiplies the raw value by 100 since the agent sends decimal values (0.302 instead of 30.2%)
+ */
+export function formatAgentMetric(value: number | undefined): number {
+  if (value === undefined) return 0;
+  return value * 100;
 } 

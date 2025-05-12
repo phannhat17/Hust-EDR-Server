@@ -123,11 +123,9 @@ func main() {
 		}
 	}
 
-	// Start command stream
+	// Start bidirectional command stream
+	log.Printf("Starting with bidirectional gRPC streaming")
 	go edrClient.StartCommandStream(ctx)
-
-	// Start status reporting
-	go startStatusReporting(ctx, edrClient)
 	
 	// Get command handler to access IOC functionality
 	commandHandler := edrClient.GetCommandHandler()
@@ -168,32 +166,4 @@ func main() {
 	// Allow time for cleanup
 	time.Sleep(500 * time.Millisecond)
 	log.Printf("Agent shutdown complete")
-}
-
-// startStatusReporting periodically sends status updates to the server
-func startStatusReporting(ctx context.Context, edrClient *client.EDRClient) {
-	ticker := time.NewTicker(1 * time.Minute)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ticker.C:
-			metrics := collectSystemMetrics()
-			if err := edrClient.UpdateStatus(ctx, "RUNNING", metrics); err != nil {
-				log.Printf("Failed to send status update: %v", err)
-			}
-		case <-ctx.Done():
-			return
-		}
-	}
-}
-
-// collectSystemMetrics collects system metrics
-func collectSystemMetrics() map[string]float64 {
-	// This is a simple placeholder - a real implementation would collect actual metrics
-	return map[string]float64{
-		"cpu_usage":    0.5,  // 50% CPU usage (placeholder)
-		"memory_usage": 0.25, // 25% memory usage (placeholder)
-		"uptime":       3600, // 1 hour uptime (placeholder)
-	}
 } 

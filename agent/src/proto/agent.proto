@@ -12,10 +12,10 @@ service EDRService {
   // Update agent status
   rpc UpdateStatus(StatusRequest) returns (StatusResponse);
   
-  // Stream for agent to receive commands
-  rpc ReceiveCommands(CommandRequest) returns (stream Command);
+  // Bidirectional streaming for agent-server communication
+  rpc CommandStream(stream CommandMessage) returns (stream CommandMessage);
   
-  // Report command execution result
+  // Report command execution result (keeping for backward compatibility)
   rpc ReportCommandResult(CommandResult) returns (CommandAck);
   
   // Send command to agent (server-initiated)
@@ -24,10 +24,10 @@ service EDRService {
   // List all agents
   rpc ListAgents(ListAgentsRequest) returns (ListAgentsResponse);
   
-  // New: Get IOCs from server
+  // Get IOCs from server
   rpc GetIOCs(IOCRequest) returns (IOCResponse);
   
-  // New: Report IOC match from agent
+  // Report IOC match from agent
   rpc ReportIOCMatch(IOCMatchReport) returns (IOCMatchAck);
 }
 
@@ -41,7 +41,7 @@ enum CommandType {
   BLOCK_URL = 5;
   NETWORK_ISOLATE = 6;
   NETWORK_RESTORE = 7;
-  UPDATE_IOCS = 8;  // New command type for IOC updates
+  UPDATE_IOCS = 8;
 }
 
 // IOC types
@@ -50,6 +50,35 @@ enum IOCType {
   IOC_IP = 1;
   IOC_HASH = 2;
   IOC_URL = 3;
+}
+
+// Message type for bidirectional streaming
+enum MessageType {
+  AGENT_HELLO = 0;
+  AGENT_STATUS = 1;
+  SERVER_COMMAND = 2;
+  COMMAND_RESULT = 3;
+}
+
+// Unified message for bidirectional streaming
+message CommandMessage {
+  string agent_id = 1;
+  int64 timestamp = 2;
+  MessageType message_type = 3;
+  
+  // Fields for specific message types
+  oneof payload {
+    AgentHello hello = 4;
+    StatusRequest status = 5;
+    Command command = 6;
+    CommandResult result = 7;
+  }
+}
+
+// Agent hello message for stream initialization
+message AgentHello {
+  string agent_id = 1;
+  int64 timestamp = 2;
 }
 
 // Agent registration request
@@ -92,12 +121,6 @@ message StatusResponse {
   string server_message = 1;
   bool acknowledged = 2;
   int64 server_time = 3;
-}
-
-// Command request (for stream)
-message CommandRequest {
-  string agent_id = 1;
-  int64 timestamp = 2;
 }
 
 // Command to execute
@@ -161,14 +184,14 @@ message ListAgentsResponse {
   repeated AgentInfo agents = 1;
 }
 
-// New: IOC request from agent
+// IOC request from agent
 message IOCRequest {
   string agent_id = 1;
   int64 current_version = 2; // Current IOC version on agent
   repeated IOCType requested_types = 3; // Types of IOCs being requested
 }
 
-// New: IOC data
+// IOC data
 message IOCData {
   string value = 1; // The IOC value (IP, hash, etc.)
   string description = 2;
@@ -176,7 +199,7 @@ message IOCData {
   map<string, string> metadata = 4; // Additional metadata
 }
 
-// New: IOC response from server
+// IOC response from server
 message IOCResponse {
   bool update_available = 1;
   int64 version = 2;
@@ -186,7 +209,7 @@ message IOCResponse {
   map<string, IOCData> urls = 6;
 }
 
-// New: IOC match report from agent
+// IOC match report from agent
 message IOCMatchReport {
   string report_id = 1;
   string agent_id = 2;
@@ -201,7 +224,7 @@ message IOCMatchReport {
   string action_message = 11;
 }
 
-// New: IOC match acknowledgment
+// IOC match acknowledgment
 message IOCMatchAck {
   string report_id = 1;
   bool received = 2;

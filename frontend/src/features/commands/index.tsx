@@ -11,7 +11,7 @@ import { CommandForm } from './command-form';
 import { formatDistanceToNow } from 'date-fns';
 import { useRouter, useSearch } from '@tanstack/react-router';
 import { apiClient } from '@/lib/api/client';
-import { isAgentOnline } from '@/types/agent';
+import { isAgentOnline, formatAgentMetric } from '@/types/agent';
 
 export default function Commands() {
   const [selectedTab, setSelectedTab] = useState('send');
@@ -136,7 +136,7 @@ export default function Commands() {
                         <div className="space-y-1">
                           <p className="text-xs text-muted-foreground">System Stats</p>
                           <div className="text-sm">
-                            CPU: {agentDetails.cpu_usage.toFixed(1)}% • Memory: {agentDetails.memory_usage.toFixed(1)}%
+                            CPU: {formatAgentMetric(agentDetails.cpu_usage).toFixed(1)}% • Memory: {formatAgentMetric(agentDetails.memory_usage).toFixed(1)}%
                           </div>
                         </div>
                         <div className="space-y-1">

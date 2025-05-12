@@ -12,7 +12,7 @@ import { Header } from '@/components/layout/header'
 import { Main } from '@/components/layout/main'
 import { TopNav } from '@/components/layout/top-nav'
 import { agentsApi } from '@/lib/api'
-import { Agent, IOCMatch, SeverityLevel } from '@/types/agent'
+import { Agent, IOCMatch, SeverityLevel, formatAgentMetric } from '@/types/agent'
 import {
   Table,
   TableBody,
@@ -245,11 +245,11 @@ export default function Agents() {
                                       <div className="grid grid-cols-3 gap-4 mt-2">
                                         <div className="bg-slate-50 dark:bg-slate-900 p-3 rounded-md">
                                           <h4 className="text-sm font-semibold text-muted-foreground">CPU Usage</h4>
-                                          <p className="text-lg font-medium">{selectedAgent.cpu_usage !== undefined ? `${selectedAgent.cpu_usage.toFixed(1)}%` : 'N/A'}</p>
+                                          <p className="text-lg font-medium">{selectedAgent.cpu_usage !== undefined ? `${formatAgentMetric(selectedAgent.cpu_usage).toFixed(1)}%` : 'N/A'}</p>
                                         </div>
                                         <div className="bg-slate-50 dark:bg-slate-900 p-3 rounded-md">
                                           <h4 className="text-sm font-semibold text-muted-foreground">Memory Usage</h4>
-                                          <p className="text-lg font-medium">{selectedAgent.memory_usage !== undefined ? `${selectedAgent.memory_usage.toFixed(1)}%` : 'N/A'}</p>
+                                          <p className="text-lg font-medium">{selectedAgent.memory_usage !== undefined ? `${formatAgentMetric(selectedAgent.memory_usage).toFixed(1)}%` : 'N/A'}</p>
                                         </div>
                                         <div className="bg-slate-50 dark:bg-slate-900 p-3 rounded-md">
                                           <h4 className="text-sm font-semibold text-muted-foreground">Uptime</h4>
