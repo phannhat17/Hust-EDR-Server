@@ -15,7 +15,7 @@ import (
 )
 
 // Define version constant
-const AGENT_VERSION = "1.0.1"
+const AGENT_VERSION = "dev1.0.1"
 
 // Command-line arguments
 var (
@@ -104,6 +104,7 @@ func main() {
 	
 	// Set metrics interval
 	edrClient.SetMetricsInterval(cfg.MetricsInterval)
+	log.Printf("Setting metrics interval to %d minutes from config", cfg.MetricsInterval)
 
 	// Start agent connection
 	ctx, cancel := context.WithCancel(context.Background())

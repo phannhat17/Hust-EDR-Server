@@ -168,6 +168,14 @@ func (h *CommandHandler) handleUpdateIOCs(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("failed to save IOCs to disk: %v", err)
 	}
 	
+	// Trigger immediate scan after IOC update
+	if h.scanner != nil {
+		log.Printf("Triggering immediate IOC scan after update")
+		h.scanner.TriggerScan()
+	} else {
+		log.Printf("WARNING: Cannot trigger IOC scan after update, scanner not available")
+	}
+	
 	return fmt.Sprintf("Updated IOCs to version %d: %d IPs, %d file hashes, %d URLs", 
 		resp.Version, len(resp.IpAddresses), len(resp.FileHashes), len(resp.Urls)), nil
 }

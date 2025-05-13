@@ -44,7 +44,7 @@ func LoadConfig(filename string) (*Config, error) {
 		cfg.ScanInterval = 5
 	}
 	if cfg.MetricsInterval <= 0 {
-		cfg.MetricsInterval = 2
+		cfg.MetricsInterval = 30
 	}
 	if cfg.Version == "" {
 		cfg.Version = "1.0.0"

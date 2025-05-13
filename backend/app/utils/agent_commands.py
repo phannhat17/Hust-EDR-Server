@@ -114,9 +114,14 @@ def get_online_agents():
         # Filter for online agents
         online_agents = []
         for agent_id, agent in agents_data.items():
-            if agent.get('status') == 'ONLINE':
+            status = agent.get('status', 'UNKNOWN')
+            if status == 'ONLINE':
                 online_agents.append(agent_id)
+                logger.debug(f"Agent {agent_id} status: {status} - considered ONLINE")
+            else:
+                logger.debug(f"Agent {agent_id} status: {status} - NOT considered online")
         
+        logger.info(f"Found {len(online_agents)} online agents for sending IOC updates")
         return online_agents
         
     except Exception as e:

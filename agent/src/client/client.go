@@ -15,6 +15,10 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"crypto/tls"
 
+	"github.com/shirou/gopsutil/v3/cpu"
+	"github.com/shirou/gopsutil/v3/mem"
+	"github.com/shirou/gopsutil/v3/host"
+
 	pb "agent/proto"
 )
 
@@ -94,8 +98,10 @@ func (c *EDRClient) SetAgentVersion(version string) {
 func (c *EDRClient) SetMetricsInterval(interval int) {
 	if interval <= 0 {
 		c.metricsInterval = 2 // Default to 2 minutes
+		log.Printf("WARNING: Invalid metrics interval %d specified, defaulting to %d minutes", interval, c.metricsInterval)
 	} else {
 		c.metricsInterval = interval
+		log.Printf("Setting metrics interval to %d minutes", interval)
 	}
 }
 
@@ -170,10 +176,10 @@ func (c *EDRClient) Register(ctx context.Context) (*AgentInfo, error) {
 
 // UpdateStatus sends a status update to the server
 func (c *EDRClient) UpdateStatus(ctx context.Context, status string, metrics map[string]float64) error {
-	// Create system metrics
+	// Create system metrics - convert from 0-1 to 0-100 percentage scale for the API
 	sysMetrics := &pb.SystemMetrics{
-		CpuUsage:    metrics["cpu_usage"],
-		MemoryUsage: metrics["memory_usage"],
+		CpuUsage:    metrics["cpu_usage"] * 100,
+		MemoryUsage: metrics["memory_usage"] * 100,
 		Uptime:      int64(metrics["uptime"]),
 	}
 
@@ -339,6 +345,7 @@ func (c *EDRClient) StartCommandStream(ctx context.Context) {
 				defer wg.Done()
 				
 				// Use the metrics interval from config (in minutes)
+				log.Printf("Creating status ticker with interval of %d minutes", c.metricsInterval)
 				statusTicker := time.NewTicker(time.Duration(c.metricsInterval) * time.Minute)
 				defer statusTicker.Stop()
 				
@@ -389,18 +396,18 @@ func sendStatusUpdate(c *EDRClient, stream pb.EDRService_CommandStreamClient, st
 			"uptime":       float64(getUptime()),
 		}
 		
-		// Log that we're sending status update
-		log.Printf("Sending status update with metrics: CPU: %.1f%%, Memory: %.1f%%, Uptime: %.0fs", 
+		// Log that we're sending status update with proper percentage formatting
+		log.Printf("Sending status update with metrics: CPU: %.2f%%, Memory: %.2f%%, Uptime: %.0fs", 
 			metrics["cpu_usage"]*100, metrics["memory_usage"]*100, metrics["uptime"])
 		
-		// Create status message
+		// Create status message - note that ServerMetrics expects values as percentages (0-100)
 		statusReq := &pb.StatusRequest{
 			AgentId:   c.agentID,
 			Timestamp: time.Now().Unix(),
 			Status:    "ONLINE",
 			SystemMetrics: &pb.SystemMetrics{
-				CpuUsage:    metrics["cpu_usage"]*100,
-				MemoryUsage: metrics["memory_usage"]*100,
+				CpuUsage:    metrics["cpu_usage"]*100,  // Convert from 0-1 to 0-100 scale
+				MemoryUsage: metrics["memory_usage"]*100, // Convert from 0-1 to 0-100 scale
 				Uptime:      int64(metrics["uptime"]),
 			},
 		}
@@ -430,31 +437,45 @@ var (
 
 // Helper functions for system metrics
 func getCPUUsage() float64 {
-	// Try to get actual CPU usage
-	// For Windows, we'll use a simple placeholder since real metrics would require CGO
-	// In a production environment, use github.com/shirou/gopsutil or similar
+	// Get actual CPU usage using gopsutil
+	percentages, err := cpu.Percent(time.Second/2, false)  // 500ms sample, average across all cores
+	if err != nil || len(percentages) == 0 {
+		log.Printf("Warning: failed to get CPU usage: %v", err)
+		return 0.1 // Default fallback value if monitoring fails
+	}
 	
-	// Return random value between 0.05 and 0.35 (5% to 35%)
-	return 0.05 + rand.Float64()*0.3
+	// Return as decimal (0.0-1.0) instead of percentage
+	return percentages[0] / 100.0
 }
 
 func getMemoryUsage() float64 {
-	// Try to get actual memory usage
-	// For Windows, we'll use a simple placeholder since real metrics would require CGO
-	// In a production environment, use github.com/shirou/gopsutil or similar
+	// Get actual memory usage using gopsutil
+	vmStat, err := mem.VirtualMemory()
+	if err != nil {
+		log.Printf("Warning: failed to get memory usage: %v", err)
+		return 0.2 // Default fallback value if monitoring fails
+	}
 	
-	// Return random value between 0.20 and 0.60 (20% to 60%)
-	return 0.2 + rand.Float64()*0.4
+	// Return as decimal (0.0-1.0)
+	return float64(vmStat.UsedPercent) / 100.0
 }
 
 func getUptime() int64 {
-	// Initialize start time only once
-	startTimeOnce.Do(func() {
-		processStartTime = time.Now()
-	})
+	// Get actual system uptime using gopsutil
+	uptime, err := host.Uptime()
+	if err != nil {
+		// Fall back to process uptime if system uptime fails
+		log.Printf("Warning: failed to get system uptime: %v", err)
+		// Initialize start time only once (original behavior)
+		startTimeOnce.Do(func() {
+			processStartTime = time.Now()
+		})
+		
+		// Return process uptime in seconds
+		return int64(time.Since(processStartTime).Seconds())
+	}
 	
-	// Return uptime in seconds
-	return int64(time.Since(processStartTime).Seconds())
+	return int64(uptime)
 }
 
 // GetCommandHandler returns the command handler

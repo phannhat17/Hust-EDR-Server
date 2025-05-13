@@ -29,6 +29,7 @@ A comprehensive Endpoint Detection and Response (EDR) system consisting of a ser
    ```
    cd backend
    python -m venv .venv
+   source .venv/bin/activate
    pip install -r requirements.txt
    python -m grpc_tools.protoc -I../agent/proto --python_out=./app/grpc --grpc_python_out=./app/grpc ../agent/proto/agent.proto
    sed -i 's/import agent_pb2 as agent__pb2/from . import agent_pb2 as agent__pb2/' ./app/grpc/agent_pb2_grpc.py
@@ -42,7 +43,6 @@ A comprehensive Endpoint Detection and Response (EDR) system consisting of a ser
 
 3. Run the development server
    ```
-   source .venv/bin/activate
    python server.py
    ``` 
 
@@ -70,7 +70,7 @@ A comprehensive Endpoint Detection and Response (EDR) system consisting of a ser
 
 4. Run the development server
    ```
-   npm run dev -- --host
+   npm run dev
    ``` 
 
 ### Agent Setup

@@ -177,14 +177,19 @@ class EDRServicer(agent_pb2_grpc.EDRServiceServicer):
         """Check if agent needs IOC update."""
         ioc_version_info = self.ioc_manager.get_version_info()
         current_agent_ioc_version = agent.get('ioc_version', 0)
+        server_version = ioc_version_info['version']
         
-        if current_agent_ioc_version < ioc_version_info['version']:
+        # Log IOC version check
+        ioc_logger.debug(f"Checking if agent {agent_id} needs IOC update: agent version {current_agent_ioc_version}, server version {server_version}")
+        
+        if current_agent_ioc_version < server_version:
             with self.stream_lock:
                 # Avoid duplicating UPDATE_IOCS commands
                 if agent_id in self.pending_commands and any(
                     cmd.type == agent_pb2.CommandType.UPDATE_IOCS 
                     for cmd in self.pending_commands[agent_id]
                 ):
+                    ioc_logger.debug(f"Agent {agent_id} already has a pending IOC update command")
                     return
                 
                 # Create a new UPDATE_IOCS command
@@ -203,18 +208,22 @@ class EDRServicer(agent_pb2_grpc.EDRServiceServicer):
                     self.pending_commands[agent_id] = []
                     
                 self.pending_commands[agent_id].append(command)
-                ioc_logger.info(f"Agent {agent_id} needs IOC update: {current_agent_ioc_version} < {ioc_version_info['version']}")
+                ioc_logger.info(f"Agent {agent_id} needs IOC update: {current_agent_ioc_version} < {server_version}, queued command {command_id}")
+        else:
+            ioc_logger.debug(f"Agent {agent_id} IOC version is current: {current_agent_ioc_version} >= {server_version}")
     
     def CommandStream(self, request_iterator, context):
         """Bidirectional stream for agent-server communication."""
         agent_id = None
         agent = None
         
-        # Track state for this stream
-        last_command_time = 0
+        # Create tracking variables for this connection
+        last_command_time = int(time.time())
         last_status_update = 0
-        status_update_interval = 60  # seconds
         check_counter = 0
+        
+        # Update interval in minutes, converted to seconds
+        status_update_interval = 30 * 60  # 30 minutes in seconds
         
         conn_logger.info("New bidirectional command stream opened")
         
@@ -287,7 +296,7 @@ class EDRServicer(agent_pb2_grpc.EDRServiceServicer):
                     agent['status'] = 'ONLINE'
                     self.storage.save_agent(agent_id, agent)
                     last_status_update = current_time
-                    debug_logger.debug(f"Updated agent {agent_id} status")
+                    debug_logger.info(f"Updated agent {agent_id} status to ONLINE, next update in {status_update_interval//60} minutes")
                 
                 # Periodic IOC check
                 if check_counter % 60 == 0:
@@ -515,39 +524,68 @@ class EDRServicer(agent_pb2_grpc.EDRServiceServicer):
             
             logger.info(f"Sending command: ID={command.command_id}, Type={cmd_type_name}, Agent={agent_id}")
             
-            # Validate command params
+            # Validate command params based on command type
             if command.type == agent_pb2.CommandType.DELETE_FILE and 'path' not in command.params:
                 return agent_pb2.SendCommandResponse(
                     success=False, 
                     message="DELETE_FILE command missing required 'path' parameter"
                 )
             
-            # Check if agent is reachable
-            current_time = int(time.time())
-            agent_online = (current_time - agent.get('last_seen', 0)) < 300  # 5 minutes
+            # Check if agent is online
+            agent_status = agent.get('status', 'UNKNOWN')
+            is_ioc_update = command.type == agent_pb2.CommandType.UPDATE_IOCS
+
+            # For IOC updates, only check the status field
+            if is_ioc_update:
+                agent_online = agent_status == 'ONLINE'
+            else:
+                # For other commands, use the timestamp check
+                current_time = int(time.time())
+                agent_online = (current_time - agent.get('last_seen', 0)) < 300  # 5 minutes
             
             if not agent_online:
                 return agent_pb2.SendCommandResponse(
                     success=False, 
-                    message=f"Agent {agent_id} is offline. Cannot send command directly."
+                    message=f"Agent {agent_id} is offline (status: {agent_status}). Cannot send command directly."
                 )
             
             # Check for active stream
             with self.stream_lock:
                 stream_active = agent_id in self.active_streams and self.active_streams[agent_id] is not None
                 if not stream_active:
-                    return agent_pb2.SendCommandResponse(
-                        success=False, 
-                        message=f"Agent {agent_id} is online but has no active command stream."
-                    )
+                    # For IOC updates, queue anyway if the agent is ONLINE in database
+                    if is_ioc_update:
+                        command.timestamp = int(time.time())
+                        if agent_id not in self.pending_commands:
+                            self.pending_commands[agent_id] = []
+                        self.pending_commands[agent_id].append(command)
+                        
+                        logger.info(f"Queued IOC update for ONLINE agent {agent_id} without active stream")
+                        return agent_pb2.SendCommandResponse(
+                            success=True,
+                            message=f"IOC update queued for agent {agent_id}"
+                        )
+                    else:
+                        return agent_pb2.SendCommandResponse(
+                            success=False, 
+                            message=f"Agent {agent_id} is online but has no active command stream."
+                        )
                 
                 # Add command to queue
-                command.timestamp = int(time.time() * 1000)
+                command.timestamp = int(time.time())
                 if agent_id not in self.pending_commands:
                     self.pending_commands[agent_id] = []
                 self.pending_commands[agent_id].append(command)
             
-            # Wait for result
+            # For IOC updates, don't wait for a response since they're handled asynchronously
+            if is_ioc_update:
+                logger.info(f"Queued IOC update command for agent {agent_id} (command ID: {command.command_id})")
+                return agent_pb2.SendCommandResponse(
+                    success=True,
+                    message=f"IOC update command queued for delivery to agent {agent_id}"
+                )
+            
+            # For other commands, wait for result
             start_time = time.time()
             timeout = 10  # seconds
             while (time.time() - start_time) < timeout:

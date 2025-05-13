@@ -392,18 +392,24 @@ class IOCManager:
                 logger.info("No online agents to notify of IOC update")
                 return
             
+            # Log attempt to send notifications
+            logger.info(f"Attempting to notify {len(online_agents)} agents of IOC update (version {self.version['version']})")
+            
             # Send IOC update command to each online agent
             success_count = 0
             for agent_id in online_agents:
-                success, message, command_id = send_update_iocs_command(agent_id)
-                
-                if success:
-                    logger.info(f"Sent IOC update command to agent {agent_id}")
-                    success_count += 1
-                else:
-                    logger.warning(f"Failed to send IOC update command to agent {agent_id}: {message}")
+                try:
+                    success, message, command_id = send_update_iocs_command(agent_id)
+                    
+                    if success:
+                        logger.info(f"Successfully sent IOC update command to agent {agent_id} (command ID: {command_id})")
+                        success_count += 1
+                    else:
+                        logger.warning(f"Failed to send IOC update command to agent {agent_id}: {message}")
+                except Exception as e:
+                    logger.error(f"Exception sending IOC update to agent {agent_id}: {e}")
             
-            logger.info(f"Notified {success_count}/{len(online_agents)} agents of IOC update")
+            logger.info(f"Notified {success_count}/{len(online_agents)} agents of IOC update to version {self.version['version']}")
                 
         except Exception as e:
             logger.error(f"Failed to notify agents of IOC update: {e}")
