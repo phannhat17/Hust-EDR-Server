@@ -24,9 +24,6 @@ service EDRService {
   // List all agents
   rpc ListAgents(ListAgentsRequest) returns (ListAgentsResponse);
   
-  // Get IOCs from server
-  rpc GetIOCs(IOCRequest) returns (IOCResponse);
-  
   // Report IOC match from agent
   rpc ReportIOCMatch(IOCMatchReport) returns (IOCMatchAck);
 }
@@ -58,6 +55,7 @@ enum MessageType {
   AGENT_STATUS = 1;
   SERVER_COMMAND = 2;
   COMMAND_RESULT = 3;
+  IOC_DATA = 4;        // New message type for IOC data
 }
 
 // Unified message for bidirectional streaming
@@ -72,6 +70,7 @@ message CommandMessage {
     StatusRequest status = 5;
     Command command = 6;
     CommandResult result = 7;
+    IOCResponse ioc_data = 8;  // Direct payload for IOC data
   }
 }
 
@@ -182,13 +181,6 @@ message AgentInfo {
 // List agents response
 message ListAgentsResponse {
   repeated AgentInfo agents = 1;
-}
-
-// IOC request from agent
-message IOCRequest {
-  string agent_id = 1;
-  int64 current_version = 2; // Current IOC version on agent
-  repeated IOCType requested_types = 3; // Types of IOCs being requested
 }
 
 // IOC data

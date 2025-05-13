@@ -12,7 +12,8 @@ from datetime import datetime
 from pathlib import Path
 
 from app.config.config import config
-from app.utils.agent_commands import get_online_agents, send_update_iocs_command
+from app.utils.agent_commands import get_online_agents, send_command_to_agent
+from app.grpc import agent_pb2
 
 # Configure logging
 logger = logging.getLogger('app.iocs')
@@ -89,10 +90,7 @@ class IOCManager:
         self._save_version()
         
         logger.info(f"Saved {self._count_iocs()} IOCs to storage (version {self.version['version']})")
-        
-        # Notify agents of IOC update
-        self.notify_agents_of_update()
-    
+            
     def _save_version(self):
         """Save version information to file."""
         with open(self.version_file, 'w') as f:
@@ -255,6 +253,8 @@ class IOCManager:
         Returns:
             dict: Version information
         """
+        # Reload from disk to make sure we have the latest version
+        self._load_version()
         return self.version
     
     def import_iocs_from_file(self, file_path):
@@ -382,35 +382,50 @@ class IOCManager:
         else:
             return False
     
-    def notify_agents_of_update(self):
-        """Notify all online agents of IOC updates."""
+    def send_updates_to_agents(self):
+        """Manually send IOC updates to all connected agents."""
         try:
             # Get list of online agents
             online_agents = get_online_agents()
             
             if not online_agents:
                 logger.info("No online agents to notify of IOC update")
-                return
+                return 0, "No online agents available"
             
             # Log attempt to send notifications
-            logger.info(f"Attempting to notify {len(online_agents)} agents of IOC update (version {self.version['version']})")
+            logger.info(f"Sending IOC update command to {len(online_agents)} agents (version {self.version['version']})")
             
-            # Send IOC update command to each online agent
+            # Send UPDATE_IOCS command to trigger immediate IOC data streaming
             success_count = 0
             for agent_id in online_agents:
                 try:
-                    success, message, command_id = send_update_iocs_command(agent_id)
+                    success, message, command_id = send_command_to_agent(
+                        agent_id=agent_id,
+                        command_type=agent_pb2.CommandType.UPDATE_IOCS,
+                        params={},
+                        priority=1,
+                        timeout=120
+                    )
                     
                     if success:
-                        logger.info(f"Successfully sent IOC update command to agent {agent_id} (command ID: {command_id})")
+                        logger.info(f"IOC update command queued for agent {agent_id} (command ID: {command_id})")
                         success_count += 1
                     else:
-                        logger.warning(f"Failed to send IOC update command to agent {agent_id}: {message}")
+                        logger.warning(f"Failed to queue IOC update for agent {agent_id}: {message}")
                 except Exception as e:
                     logger.error(f"Exception sending IOC update to agent {agent_id}: {e}")
             
-            logger.info(f"Notified {success_count}/{len(online_agents)} agents of IOC update to version {self.version['version']}")
+            logger.info(f"IOC update commands sent to {success_count}/{len(online_agents)} agents for version {self.version['version']}")
+            return success_count, f"Updates sent to {success_count}/{len(online_agents)} agents"
                 
         except Exception as e:
             logger.error(f"Failed to notify agents of IOC update: {e}")
-            return 
+            return 0, f"Error sending updates: {str(e)}"
+    
+    def reload_data(self):
+        """Reload all IOC data and version information from disk."""
+        logger.info("Reloading IOC data and version from disk")
+        self._load_iocs()
+        self._load_version()
+        logger.info(f"Reloaded IOC data: {self._count_iocs()} indicators, version {self.version['version']}")
+        return True

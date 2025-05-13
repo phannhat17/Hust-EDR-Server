@@ -127,21 +127,15 @@ func main() {
 		}
 	}
 	
-	// Get command handler to access IOC functionality
+	// Get command handler for IOC Scanner configuration
 	commandHandler := edrClient.GetCommandHandler()
 	
-	// Update IOCs from server on startup
-	log.Printf("Checking for IOC updates on startup...")
-	result, err := commandHandler.UpdateIOCs(ctx)
-	if err != nil {
-		log.Printf("Warning: failed to update IOCs on startup: %v", err)
-	} else {
-		log.Printf("IOC update on startup: %s", result)
-	}
-
-	// Start bidirectional command stream
-	log.Printf("Starting with bidirectional gRPC streaming")
+	// Start bidirectional command stream - IOC updates will come through this channel
+	log.Printf("Starting bidirectional gRPC streaming - IOC updates will be received through this channel")
 	go edrClient.StartCommandStream(ctx)
+	
+	// Request IOC updates on startup
+	go requestIOCUpdatesOnStartup(ctx, edrClient)
 	
 	// Use config scan interval if command-line flag wasn't explicitly set
 	intervalMinutes := *scanMinutes
@@ -182,4 +176,13 @@ func main() {
 	// Allow time for cleanup
 	time.Sleep(500 * time.Millisecond)
 	log.Printf("Agent shutdown complete")
+}
+
+// requestIOCUpdatesOnStartup sends a request to the server for IOC updates
+func requestIOCUpdatesOnStartup(ctx context.Context, edrClient *client.EDRClient) {
+	// Give time for the command stream to establish
+	time.Sleep(3 * time.Second)
+	
+	log.Printf("Requesting IOC updates from server...")
+	edrClient.RequestIOCUpdates(ctx)
 } 

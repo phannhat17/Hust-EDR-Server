@@ -300,6 +300,39 @@ func (c *EDRClient) StartCommandStream(ctx context.Context) {
 						
 						// Process command in a separate goroutine
 						go func(command *pb.Command) {
+							// Special handling for UPDATE_IOCS command
+							// For this command, we'll wait for the IOC_DATA message that follows
+							// rather than making a separate RPC call
+							if command.Type == pb.CommandType_UPDATE_IOCS {
+								log.Printf("Received IOC update command, waiting for IOC data in stream...")
+								// For UPDATE_IOCS, just acknowledge receipt
+								// The actual data will come through IOC_DATA message
+								result := &pb.CommandResult{
+									CommandId:     command.CommandId,
+									AgentId:       command.AgentId,
+									ExecutionTime: time.Now().Unix(),
+									Success:       true,
+									Message:       "UPDATE_IOCS command received, waiting for data",
+								}
+								
+								// Send result
+								resultMsg := &pb.CommandMessage{
+									AgentId:     c.agentID,
+									Timestamp:   time.Now().Unix(),
+									MessageType: pb.MessageType_COMMAND_RESULT,
+									Payload: &pb.CommandMessage_Result{
+										Result: result,
+									},
+								}
+								
+								if err := stream.Send(resultMsg); err != nil {
+									log.Printf("Failed to send command result: %v", err)
+								}
+								// Don't process further - wait for IOC_DATA message
+								return
+							}
+							
+							// For all other command types, process normally
 							// Execute command
 							result := c.cmdHandler.HandleCommand(ctx, command)
 							
@@ -322,19 +355,89 @@ func (c *EDRClient) StartCommandStream(ctx context.Context) {
 								if err := stream.Send(resultMsg); err != nil {
 									log.Printf("Failed to send command result: %v", err)
 								}
-								
-								// If this was an UPDATE_IOCS command and it was successful, trigger an IOC scan immediately
-								if command.Type == pb.CommandType_UPDATE_IOCS && result.Success {
-									log.Printf("IOCs updated successfully, triggering immediate scan")
-									scanner := c.cmdHandler.GetScanner()
-									if scanner != nil {
-										go scanner.TriggerScan()
-									} else {
-										log.Printf("WARNING: Cannot trigger IOC scan, scanner not available")
-									}
-								}
 							}
 						}(cmd)
+					
+					case pb.MessageType_IOC_DATA:
+						// Handle IOC data from server
+						iocData := message.GetIocData()
+						if iocData == nil {
+							log.Println("Received IOC_DATA message with no IOC payload")
+							continue
+						}
+						
+						log.Printf("Received IOC data: version %d, %d IPs, %d file hashes, %d URLs", 
+							iocData.Version, len(iocData.IpAddresses), len(iocData.FileHashes), len(iocData.Urls))
+						
+						// Process IOC data in a separate goroutine
+						go func(data *pb.IOCResponse) {
+							// Get command handler to access IOC manager
+							handler := c.GetCommandHandler()
+							if handler == nil {
+								log.Printf("ERROR: Command handler not available")
+								return
+							}
+							
+							// Get IOC manager
+							iocManager := handler.GetIOCManager()
+							if iocManager == nil {
+								log.Printf("ERROR: IOC manager not available")
+								return
+							}
+							
+							// Get current version
+							currentVersion := iocManager.GetVersion()
+							if data.Version <= currentVersion {
+								log.Printf("Received IOC version %d is not newer than current version %d, ignoring", 
+									data.Version, currentVersion)
+								return
+							}
+							
+							// Process the IOC data
+							log.Printf("Processing IOC update to version %d", data.Version)
+							
+							// Clear existing IOCs
+							iocManager.ClearAll()
+							
+							// Add IP addresses
+							for ip, iocData := range data.IpAddresses {
+								iocManager.AddIP(ip, iocData.Description, iocData.Severity)
+							}
+							
+							// Add file hashes
+							for hash, iocData := range data.FileHashes {
+								hashType := "sha256" // Default
+								if val, ok := iocData.Metadata["hash_type"]; ok {
+									hashType = val
+								}
+								iocManager.AddFileHash(hash, hashType, iocData.Description, iocData.Severity)
+							}
+							
+							// Add URLs
+							for url, iocData := range data.Urls {
+								iocManager.AddURL(url, iocData.Description, iocData.Severity)
+							}
+							
+							// Update version
+							iocManager.SetVersion(data.Version)
+							
+							// Save IOCs to disk
+							if err := iocManager.SaveToFile(); err != nil {
+								log.Printf("ERROR: Failed to save IOCs to disk: %v", err)
+								return
+							}
+							
+							log.Printf("Successfully updated IOCs to version %d", data.Version)
+							
+							// Trigger immediate scan
+							scanner := handler.GetScanner()
+							if scanner != nil {
+								log.Printf("Triggering immediate IOC scan after update")
+								scanner.TriggerScan()
+							} else {
+								log.Printf("WARNING: Cannot trigger IOC scan, scanner not available")
+							}
+						}(iocData)
 					}
 				}
 			}()
@@ -481,6 +584,36 @@ func getUptime() int64 {
 // GetCommandHandler returns the command handler
 func (c *EDRClient) GetCommandHandler() *CommandHandler {
 	return c.cmdHandler
+}
+
+// RequestIOCUpdates sends a request to the server to get the latest IOC data
+func (c *EDRClient) RequestIOCUpdates(ctx context.Context) {
+	log.Printf("Requesting IOC updates from server via command stream...")
+	
+	// Send the message through the SendCommand RPC
+	cmd := &pb.SendCommandRequest{
+		Command: &pb.Command{
+			CommandId: fmt.Sprintf("req-ioc-%d", time.Now().UnixNano()),
+			AgentId:   c.agentID,
+			Timestamp: time.Now().Unix(),
+			Type:      pb.CommandType_UPDATE_IOCS,
+			Params:    map[string]string{"request_type": "initial"},
+			Priority:  1,
+		},
+	}
+	
+	// Send the command to request IOC updates
+	resp, err := c.edrClient.SendCommand(ctx, cmd)
+	if err != nil {
+		log.Printf("Failed to request IOC updates: %v", err)
+		return
+	}
+	
+	if resp.Success {
+		log.Printf("IOC update request sent successfully: %s", resp.Message)
+	} else {
+		log.Printf("IOC update request failed: %s", resp.Message)
+	}
 }
 
 // Close closes the client connection

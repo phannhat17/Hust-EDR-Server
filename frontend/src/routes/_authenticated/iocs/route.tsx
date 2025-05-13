@@ -126,6 +126,28 @@ function IOCsPage() {
     }
   })
   
+  // Send IOC updates mutation
+  const sendIOCUpdatesMutation = useMutation({
+    mutationFn: () => iocsApi.sendIOCUpdates(),
+    onSuccess: (data) => {
+      toast({
+        title: 'Updates sent',
+        description: data.message || `IOC updates sent to ${data.agents_updated} agents.`,
+      })
+    },
+    onError: (error: any) => {
+      toast({
+        title: 'Error',
+        description: error.response?.data?.message || 'Failed to send IOC updates',
+        variant: 'destructive',
+      })
+    }
+  })
+  
+  const handleSendUpdates = () => {
+    sendIOCUpdatesMutation.mutate()
+  }
+  
   const handleRemoveIOC = (type: IOCType, value: string) => {
     if (confirm(`Are you sure you want to remove this ${type} IOC?`)) {
       removeIOCMutation.mutate({ type, value })
@@ -196,6 +218,22 @@ function IOCsPage() {
       <Header>
         <h1 className="text-lg font-semibold">Indicators of Compromise (IOCs)</h1>
         <div className="ml-auto flex items-center space-x-2">
+          <Button 
+            variant="outline"
+            onClick={handleSendUpdates}
+            disabled={sendIOCUpdatesMutation.isPending}
+          >
+            {sendIOCUpdatesMutation.isPending ? (
+              <>
+                <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                Sending...
+              </>
+            ) : (
+              <>
+                Send Update
+              </>
+            )}
+          </Button>
           <Dialog open={showAddDialog} onOpenChange={setShowAddDialog}>
             <DialogTrigger asChild>
               <Button>

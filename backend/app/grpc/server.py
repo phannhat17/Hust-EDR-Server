@@ -143,29 +143,28 @@ class EDRServicer(agent_pb2_grpc.EDRServiceServicer):
         
         # Check if agent exists
         agent = self.storage.get_agent(agent_id)
-        if not agent:
-            logger.warning(f"Status update from unknown agent: {agent_id}")
-            return agent_pb2.StatusResponse(
-                server_message="Unknown agent",
-                acknowledged=False,
-                server_time=int(time.time())
-            )
-        
-        # Update agent status
-        agent.update({
-            'last_seen': timestamp,
-            'status': status
-        })
-        
-        # Update metrics if provided
-        if request.system_metrics:
+        if agent:
+            # Update agent status - ensure it's changed from REGISTERED to ONLINE
+            if agent.get('status') == 'REGISTERED' and status == 'ONLINE':
+                logger.info(f"Agent {agent_id} status changing from REGISTERED to ONLINE")
+            
             agent.update({
-                'cpu_usage': request.system_metrics.cpu_usage,
-                'memory_usage': request.system_metrics.memory_usage,
-                'uptime': request.system_metrics.uptime
+                'last_seen': timestamp,
+                'status': status
             })
-        
-        self.storage.save_agent(agent_id, agent)
+            
+            # Update metrics if provided
+            if request.system_metrics:
+                agent.update({
+                    'cpu_usage': request.system_metrics.cpu_usage,
+                    'memory_usage': request.system_metrics.memory_usage,
+                    'uptime': request.system_metrics.uptime
+                })
+            
+            self.storage.save_agent(agent_id, agent)
+            logger.info(f"Updated agent {agent_id} status to {status}")
+        else:
+            logger.warning(f"Received status update for unknown agent {agent_id}")
         
         return agent_pb2.StatusResponse(
             server_message="Status update acknowledged",
@@ -175,6 +174,9 @@ class EDRServicer(agent_pb2_grpc.EDRServiceServicer):
     
     def _check_ioc_update_needed(self, agent, agent_id):
         """Check if agent needs IOC update."""
+        # Reload IOC data to ensure we have the latest version
+        self.ioc_manager.reload_data()
+        
         ioc_version_info = self.ioc_manager.get_version_info()
         current_agent_ioc_version = agent.get('ioc_version', 0)
         server_version = ioc_version_info['version']
@@ -259,6 +261,12 @@ class EDRServicer(agent_pb2_grpc.EDRServiceServicer):
                         self.active_streams[agent_id] = context
                         conn_logger.debug(f"Registered bidirectional command stream for agent {agent_id}")
                     
+                    # Update agent status to ONLINE when stream is established
+                    agent['status'] = 'ONLINE'
+                    agent['last_seen'] = int(time.time())
+                    self.storage.save_agent(agent_id, agent)
+                    logger.info(f"Agent {agent_id} connected and set to ONLINE status")
+                    
                     # Initial IOC check
                     self._check_ioc_update_needed(agent, agent_id)
                     
@@ -327,6 +335,80 @@ class EDRServicer(agent_pb2_grpc.EDRServiceServicer):
                                 yield cmd_msg
                                 last_command_time = max(last_command_time, command.timestamp)
                                 sent_command_ids.append(command.command_id)
+                                
+                                # If this is an IOC update command, immediately send the IOC data
+                                if command.type == agent_pb2.CommandType.UPDATE_IOCS:
+                                    # Get current IOC data
+                                    ioc_version_info = self.ioc_manager.get_version_info()
+                                    server_version = ioc_version_info['version']
+                                    
+                                    # Debug log to show what version we're actually sending
+                                    logger.info(f"IOC version info from manager: {ioc_version_info}")
+                                    
+                                    all_iocs = self.ioc_manager.get_all_iocs()
+                                    iocs = all_iocs['iocs']
+                                    
+                                    # Debug log for all_iocs version
+                                    logger.info(f"IOC version from get_all_iocs(): {all_iocs.get('version')}")
+                                    
+                                    # Make sure we're using the right version
+                                    server_version = max(server_version, all_iocs.get('version', 0))
+                                    logger.info(f"Using IOC version: {server_version} for sending to agent {agent_id}")
+                                    
+                                    # Create IOC response
+                                    ioc_response = agent_pb2.IOCResponse(
+                                        update_available=True,
+                                        version=server_version,
+                                        timestamp=int(time.time())
+                                    )
+                                    
+                                    # Add IP addresses
+                                    for ip, info in iocs.get('ip_addresses', {}).items():
+                                        ioc_data = agent_pb2.IOCData(
+                                            value=ip,
+                                            description=info.get('description', ''),
+                                            severity=info.get('severity', 'medium')
+                                        )
+                                        ioc_response.ip_addresses[ip].CopyFrom(ioc_data)
+                                    
+                                    # Add file hashes
+                                    for file_hash, info in iocs.get('file_hashes', {}).items():
+                                        metadata = {}
+                                        if 'hash_type' in info:
+                                            metadata['hash_type'] = info['hash_type']
+                                        
+                                        ioc_data = agent_pb2.IOCData(
+                                            value=file_hash,
+                                            description=info.get('description', ''),
+                                            severity=info.get('severity', 'medium'),
+                                            metadata=metadata
+                                        )
+                                        ioc_response.file_hashes[file_hash].CopyFrom(ioc_data)
+                                    
+                                    # Add URLs
+                                    for url, info in iocs.get('urls', {}).items():
+                                        ioc_data = agent_pb2.IOCData(
+                                            value=url,
+                                            description=info.get('description', ''),
+                                            severity=info.get('severity', 'medium')
+                                        )
+                                        ioc_response.urls[url].CopyFrom(ioc_data)
+                                    
+                                    # Send IOC data message
+                                    ioc_msg = agent_pb2.CommandMessage(
+                                        agent_id=agent_id,
+                                        timestamp=int(time.time()),
+                                        message_type=agent_pb2.MessageType.IOC_DATA
+                                    )
+                                    ioc_msg.ioc_data.CopyFrom(ioc_response)
+                                    
+                                    yield ioc_msg
+                                    logger.info(f"Sent IOC data directly through command stream to agent {agent_id}: v{server_version}, {len(ioc_response.ip_addresses)} IPs, {len(ioc_response.file_hashes)} hashes, {len(ioc_response.urls)} URLs")
+                                    
+                                    # Update agent's IOC version in database
+                                    agent['ioc_version'] = server_version
+                                    self.storage.save_agent(agent_id, agent)
+                                    logger.info(f"Updated agent {agent_id} IOC version to {server_version}")
                         
                         # Remove sent commands
                         if sent_command_ids:
@@ -364,7 +446,10 @@ class EDRServicer(agent_pb2_grpc.EDRServiceServicer):
                     # Check if agent exists
                     agent = self.storage.get_agent(agent_id)
                     if agent:
-                        # Update agent status
+                        # Update agent status - ensure it's changed from REGISTERED to ONLINE
+                        if agent.get('status') == 'REGISTERED' and status == 'ONLINE':
+                            logger.info(f"Agent {agent_id} status changing from REGISTERED to ONLINE")
+                        
                         agent.update({
                             'last_seen': status_req.timestamp,
                             'status': status
@@ -379,6 +464,9 @@ class EDRServicer(agent_pb2_grpc.EDRServiceServicer):
                             })
                         
                         self.storage.save_agent(agent_id, agent)
+                        logger.info(f"Updated agent {agent_id} status to {status}")
+                    else:
+                        logger.warning(f"Received status update for unknown agent {agent_id}")
                 
                 elif message.message_type == agent_pb2.MessageType.COMMAND_RESULT:
                     # Handle command result
@@ -607,87 +695,6 @@ class EDRServicer(agent_pb2_grpc.EDRServiceServicer):
         except Exception as e:
             logger.error(f"Error in SendCommand: {e}")
             return agent_pb2.SendCommandResponse(success=False, message=str(e))
-    
-    def GetIOCs(self, request, context):
-        """Handle IOC request from agent."""
-        agent_id = request.agent_id
-        current_version = request.current_version
-        
-        logger.info(f"IOC request from agent {agent_id}, current version: {current_version}")
-        
-        # Check if agent exists
-        agent = self.storage.get_agent(agent_id)
-        if not agent:
-            logger.warning(f"IOC request from unknown agent: {agent_id}")
-            context.abort(grpc.StatusCode.NOT_FOUND, "Unknown agent")
-            return agent_pb2.IOCResponse()
-        
-        # Update agent last seen
-        agent['last_seen'] = int(time.time())
-        self.storage.save_agent(agent_id, agent)
-        
-        # Get current IOC database version
-        ioc_version_info = self.ioc_manager.get_version_info()
-        server_version = ioc_version_info['version']
-        
-        # Check if update is needed
-        if current_version >= server_version:
-            return agent_pb2.IOCResponse(
-                update_available=False,
-                version=server_version,
-                timestamp=int(time.time())
-            )
-        
-        # Get IOCs to send
-        all_iocs = self.ioc_manager.get_all_iocs()
-        iocs = all_iocs['iocs']
-        
-        # Create response
-        response = agent_pb2.IOCResponse(
-            update_available=True,
-            version=server_version,
-            timestamp=int(time.time())
-        )
-        
-        # Add IP addresses - using proper protobuf map field assignment
-        for ip, info in iocs.get('ip_addresses', {}).items():
-            ioc_data = agent_pb2.IOCData(
-                value=ip,
-                description=info.get('description', ''),
-                severity=info.get('severity', 'medium')
-            )
-            response.ip_addresses[ip].CopyFrom(ioc_data)
-        
-        # Add file hashes
-        for file_hash, info in iocs.get('file_hashes', {}).items():
-            metadata = {}
-            if 'hash_type' in info:
-                metadata['hash_type'] = info['hash_type']
-            
-            ioc_data = agent_pb2.IOCData(
-                value=file_hash,
-                description=info.get('description', ''),
-                severity=info.get('severity', 'medium'),
-                metadata=metadata
-            )
-            response.file_hashes[file_hash].CopyFrom(ioc_data)
-        
-        # Add URLs
-        for url, info in iocs.get('urls', {}).items():
-            ioc_data = agent_pb2.IOCData(
-                value=url,
-                description=info.get('description', ''),
-                severity=info.get('severity', 'medium')
-            )
-            response.urls[url].CopyFrom(ioc_data)
-        
-        # Update agent in storage with new IOC version
-        agent['ioc_version'] = server_version
-        self.storage.save_agent(agent_id, agent)
-        
-        logger.info(f"Sent IOC update to agent {agent_id}: v{server_version}, {len(response.ip_addresses)} IPs, {len(response.file_hashes)} hashes, {len(response.urls)} URLs")
-        
-        return response
     
     def ReportIOCMatch(self, request, context):
         """Handle IOC match report from agent."""

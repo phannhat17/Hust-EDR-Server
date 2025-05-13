@@ -78,23 +78,6 @@ def send_command_to_agent(agent_id, command_type, params=None, priority=1, timeo
         logger.error(f"Error sending command to agent {agent_id}: {e}")
         return False, str(e), None
 
-def send_update_iocs_command(agent_id):
-    """Send an UPDATE_IOCS command to an agent.
-    
-    Args:
-        agent_id (str): Agent ID
-        
-    Returns:
-        tuple: (success, message, command_id)
-    """
-    return send_command_to_agent(
-        agent_id=agent_id,
-        command_type=agent_pb2.CommandType.UPDATE_IOCS,
-        params={},
-        priority=1,
-        timeout=120
-    )
-
 def get_online_agents():
     """Get a list of online agent IDs.
     
