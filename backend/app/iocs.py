@@ -399,6 +399,9 @@ class IOCManager:
             success_count = 0
             for agent_id in online_agents:
                 try:
+                    # Add a small delay between agent requests to prevent race conditions
+                    time.sleep(0.2)
+                    
                     success, message, command_id = send_command_to_agent(
                         agent_id=agent_id,
                         command_type=agent_pb2.CommandType.UPDATE_IOCS,

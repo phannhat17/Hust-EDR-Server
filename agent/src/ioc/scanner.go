@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"encoding/xml"
 	"fmt"
 	"io"
 	"log"
@@ -15,7 +16,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"time"
 
@@ -32,6 +32,7 @@ type Scanner struct {
 	networkBlocker  *NetworkBlocker
 	sysmonLogPath   string
 	triggerScan     chan struct{}
+	lastScanTime    time.Time // Track when the last scan was performed
 }
 
 // NetworkBlocker handles blocking of malicious IPs and URLs
@@ -141,6 +142,7 @@ func NewScanner(manager *Manager, reportCallback func(context.Context, pb.IOCTyp
 		networkBlocker:  NewNetworkBlocker(manager.StoragePath),
 		sysmonLogPath:   sysmonLogPath,
 		triggerScan:     make(chan struct{}, 1),
+		lastScanTime:    time.Now(), // Start with current time since we skip first scan
 	}
 }
 
@@ -154,8 +156,11 @@ func (s *Scanner) Start() {
 	// Initialize URL blockers on startup
 	s.initializeURLBlocking()
 	
+	// Flag to indicate this is first run
+	isFirstRun := true
+	
 	// Run initial scan
-	go s.runScan()
+	go s.runScan(isFirstRun)
 	
 	// Start periodic scans only if interval is positive
 	go func() {
@@ -172,11 +177,11 @@ func (s *Scanner) Start() {
 		for {
 			select {
 			case <-ticker.C:
-				go s.runScan()
+				go s.runScan(false) // Not first run
 			case <-s.triggerScan:
 				// Perform immediate scan
 				log.Printf("Triggering immediate IOC scan")
-				go s.runScan()
+				go s.runScan(false) // Not first run
 				
 				// Reset the timer
 				ticker.Reset(time.Duration(interval) * time.Minute)
@@ -424,7 +429,7 @@ func (s *Scanner) checkAndBlockNewURLs() {
 }
 
 // runScan performs a complete scan
-func (s *Scanner) runScan() {
+func (s *Scanner) runScan(isFirstRun bool) {
 	log.Printf("Starting IOC scan")
 	start := time.Now()
 	
@@ -434,8 +439,13 @@ func (s *Scanner) runScan() {
 	// Check for new URLs to block
 	s.checkAndBlockNewURLs()
 	
-	// Scan sysmon logs for file hash matches
-	s.scanSysmonLogs()
+	// Skip file hash scanning on first run to improve startup performance
+	if isFirstRun {
+		log.Printf("Skipping file hash scanning on first run for better performance")
+	} else {
+		// Scan sysmon logs for file hash matches
+		s.scanSysmonLogs()
+	}
 	
 	duration := time.Since(start)
 	log.Printf("IOC scan completed in %v", duration)
@@ -462,18 +472,77 @@ func (s *Scanner) scanSysmonLogs() {
 	s.scanWindowsSysmonLogs()
 }
 
+// XML structures for parsing Sysmon events
+type Events struct {
+	XMLName xml.Name `xml:"Events"`
+	Event   []Event  `xml:"Event"`
+}
+
+type Event struct {
+	System    System    `xml:"System"`
+	EventData EventData `xml:"EventData"`
+}
+
+type System struct {
+	EventID    int       `xml:"EventID"`
+	TimeCreated TimeCreated `xml:"TimeCreated"`
+}
+
+type TimeCreated struct {
+	SystemTime string `xml:"SystemTime,attr"`
+}
+
+type EventData struct {
+	Data []Data `xml:"Data"`
+}
+
+type Data struct {
+	Name  string `xml:"Name,attr"`
+	Value string `xml:",chardata"`
+}
+
 // scanWindowsSysmonLogs scans Windows Sysmon event logs for file creation events
 func (s *Scanner) scanWindowsSysmonLogs() {
+	// Get the timestamp for last scan in the format expected by wevtutil
+	// Format: yyyy-MM-ddTHH:mm:ss.sssZ
+	lastScanTimeStr := s.lastScanTime.Format("2006-01-02T15:04:05.000Z")
+	
 	// On Windows, we need to export recent events to a temporary file
 	tempFile := filepath.Join(os.TempDir(), "edr_sysmon_export.xml")
 	
-	// Export events from last 24 hours (adjust timeframe as needed)
-	cmd := exec.Command("wevtutil", "qe", "Microsoft-Windows-Sysmon/Operational", 
-		"/q:*[System[(EventID=1 or EventID=11) and TimeCreated[timediff(@SystemTime) <= 86400000]]]",
-		"/e:Events", "/f:xml", "/uni:true")
-	output, err := cmd.Output()
+	// Build query to get events since last scan (both file creation and hash events)
+	// EventID 1 = Process creation
+	// EventID 11 = File creation
+	// EventID 15 = File create stream hash
+	// EventID 23 = File delete
+	// EventID 29 = Remote thread creation - often used in malware injection
+	queryStr := fmt.Sprintf("*[System[(EventID=1 or EventID=11 or EventID=15 or EventID=23 or EventID=29) and TimeCreated[@SystemTime>'%s']]]", lastScanTimeStr)
+	
+	// Export sysmon events
+	var output []byte
+	var err error
+	
+	// Try up to 3 times with increasing delays
+	for attempt := 1; attempt <= 3; attempt++ {
+		cmd := exec.Command("wevtutil", "qe", "Microsoft-Windows-Sysmon/Operational", 
+			"/q:"+queryStr, "/e:Events", "/f:xml", "/uni:true")
+		
+		output, err = cmd.Output()
+		if err == nil {
+			break
+		}
+		
+		log.Printf("Attempt %d: Failed to export sysmon events: %v", attempt, err)
+		if attempt < 3 {
+			// Wait with exponential backoff
+			waitTime := time.Duration(attempt*attempt) * time.Second
+			log.Printf("Retrying in %v...", waitTime)
+			time.Sleep(waitTime)
+		}
+	}
+	
 	if err != nil {
-		log.Printf("Failed to export sysmon events: %v", err)
+		log.Printf("All attempts to export sysmon events failed. Last error: %v", err)
 		return
 	}
 	
@@ -484,65 +553,140 @@ func (s *Scanner) scanWindowsSysmonLogs() {
 	}
 	defer os.Remove(tempFile)
 	
-	// Parse the XML for file hash information
+	// Record current time for next scan
+	s.lastScanTime = time.Now()
+	
+	// Parse the XML properly
 	fileContent, err := os.ReadFile(tempFile)
 	if err != nil {
 		log.Printf("Failed to read sysmon export: %v", err)
 		return
 	}
 	
-	// Simple regex to find hashes and file paths
-	hashRegex := regexp.MustCompile(`<Data Name="Hash">([^<]+)</Data>`)
-	pathRegex := regexp.MustCompile(`<Data Name="TargetFilename">([^<]+)</Data>`)
-	
-	hashMatches := hashRegex.FindAllStringSubmatch(string(fileContent), -1)
-	pathMatches := pathRegex.FindAllStringSubmatch(string(fileContent), -1)
-	
-	if len(hashMatches) != len(pathMatches) {
-		log.Printf("Mismatch between hash and path count in sysmon logs")
+	var events Events
+	if err := xml.Unmarshal(fileContent, &events); err != nil {
+		log.Printf("Failed to parse sysmon XML: %v", err)
 		return
 	}
 	
-	for i := 0; i < len(hashMatches); i++ {
-		if i < len(pathMatches) {
-			hashData := hashMatches[i][1]
-			filePath := pathMatches[i][1]
-			
-			// Hash data might contain multiple hash algorithms
-			hashes := strings.Split(hashData, ",")
-			
-			for _, hash := range hashes {
-				parts := strings.SplitN(hash, "=", 2)
-				if len(parts) == 2 {
-					hashValue := strings.TrimSpace(parts[1])
-					
+	// Process each event
+	for _, event := range events.Event {
+		// Map to store data for each event
+		eventData := make(map[string]string)
+		
+		// Extract data
+		for _, data := range event.EventData.Data {
+			if data.Name != "" {
+				eventData[data.Name] = data.Value
+			}
+		}
+		
+		// Process based on event type
+		switch event.System.EventID {
+		case 1: // Process creation
+			if hash, ok := eventData["Hashes"]; ok {
+				image := eventData["Image"]
+				s.processHashesData(hash, image)
+			}
+		case 11: // File creation
+			targetPath := eventData["TargetFilename"]
+			// For file creation, try to calculate hash ourselves
+			if targetPath != "" {
+				hashValue, err := s.calculateFileHash(targetPath)
+				if err == nil {
 					// Check if hash matches IOCs
 					match, ioc := s.manager.CheckFileHash(hashValue)
 					if match {
-						log.Printf("Found file hash IOC match: %s (%s)", filePath, hashValue)
-						
-						// Delete the malicious file
-						if err := os.Remove(filePath); err != nil {
-							log.Printf("Failed to delete malicious file %s: %v", filePath, err)
-						} else {
-							log.Printf("Successfully deleted malicious file: %s", filePath)
-						}
-						
-						// Report the match
-						if s.reportCallback != nil {
-							s.reportCallback(
-								s.ctx,
-								pb.IOCType_IOC_HASH,
-								ioc.Value,
-								hashValue,
-								fmt.Sprintf("Malicious file: %s (deleted: %v)", filePath, err == nil),
-								ioc.Severity,
-							)
-						}
+						s.handleMaliciousFile(targetPath, hashValue, &ioc)
 					}
 				}
 			}
+		case 15: // File create stream hash
+			if hash, ok := eventData["Hash"]; ok {
+				filePath := eventData["TargetFilename"]
+				s.processHashesData(hash, filePath)
+			}
+		case 23: // File delete (still check in case a malicious file was deleted)
+			if hash, ok := eventData["Hashes"]; ok {
+				image := eventData["Image"]
+				s.processHashesData(hash, image)
+			}
+		case 29: // Remote thread creation (potential code injection)
+			sourceImage := eventData["SourceImage"]
+			targetImage := eventData["TargetImage"]
+			
+			// Get file hashes for both processes if possible
+			sourceHash, err := s.calculateFileHash(sourceImage)
+			if err == nil {
+				// Check source process hash
+				match, ioc := s.manager.CheckFileHash(sourceHash)
+				if match {
+					log.Printf("Malicious process creating remote thread detected: %s (%s)", sourceImage, sourceHash)
+					s.handleMaliciousFile(sourceImage, sourceHash, &ioc)
+				}
+			}
+			
+			// Check target process too (in case malware is injecting into a known bad process)
+			targetHash, err := s.calculateFileHash(targetImage)
+			if err == nil {
+				match, ioc := s.manager.CheckFileHash(targetHash)
+				if match {
+					log.Printf("Remote thread created in malicious process: %s (%s)", targetImage, targetHash)
+					s.handleMaliciousFile(targetImage, targetHash, &ioc)
+				}
+			}
+			
+			// Log the event for auditing purposes even if no matches
+			log.Printf("Remote thread created from %s to %s", sourceImage, targetImage)
 		}
+	}
+	
+	log.Printf("Sysmon log scan complete, found %d events", len(events.Event))
+}
+
+// processHashesData processes hash data in format SHA256=X,MD5=Y,SHA1=Z
+func (s *Scanner) processHashesData(hashData string, filePath string) {
+	// Hash data might contain multiple hash algorithms
+	hashes := strings.Split(hashData, ",")
+	
+	for _, hash := range hashes {
+		parts := strings.SplitN(hash, "=", 2)
+		if len(parts) == 2 {
+			hashValue := strings.TrimSpace(parts[1])
+			
+			// Check if hash matches IOCs
+			match, ioc := s.manager.CheckFileHash(hashValue)
+			if match {
+				s.handleMaliciousFile(filePath, hashValue, &ioc)
+			}
+		}
+	}
+}
+
+// handleMaliciousFile takes action on a malicious file
+func (s *Scanner) handleMaliciousFile(filePath string, hashValue string, ioc *IOC) {
+	log.Printf("Found file hash IOC match: %s (%s)", filePath, hashValue)
+	
+	fileDeleted := false
+	
+	// Delete the malicious file
+	if err := os.Remove(filePath); err != nil {
+		log.Printf("Failed to delete malicious file %s: %v", filePath, err)
+	} else {
+		log.Printf("Successfully deleted malicious file: %s", filePath)
+		fileDeleted = true
+	}
+	
+	// Report the match
+	if s.reportCallback != nil {
+		s.reportCallback(
+			s.ctx,
+			pb.IOCType_IOC_HASH,
+			ioc.Value,
+			hashValue,
+			fmt.Sprintf("Malicious file: %s (deleted: %v)", filePath, fileDeleted),
+			ioc.Severity,
+		)
 	}
 }
 

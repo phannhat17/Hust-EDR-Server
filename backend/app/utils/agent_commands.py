@@ -10,9 +10,13 @@ import grpc
 from app.config.config import config
 from app.grpc import agent_pb2, agent_pb2_grpc
 import json
+import threading
 
 # Set up logger
 logger = logging.getLogger(__name__)
+
+# Add a lock for synchronizing agent data access
+agent_data_lock = threading.Lock()
 
 def create_grpc_client():
     """Create a gRPC client for command services."""
@@ -50,6 +54,11 @@ def send_command_to_agent(agent_id, command_type, params=None, priority=1, timeo
     if params is None:
         params = {}
     
+    # Check if agent exists before sending command
+    online_agents = get_online_agents()
+    if agent_id not in online_agents:
+        return False, f"Agent with ID {agent_id} does not exist or is not online", None
+    
     try:
         # Create gRPC client
         client = create_grpc_client()
@@ -85,27 +94,29 @@ def get_online_agents():
         list: List of online agent IDs
     """
     try:
-        # Get list of agents
-        agents_file = os.path.join(config.DATA_DIR, 'agents.json')
-        if not os.path.exists(agents_file):
-            logger.warning("No agents file found")
-            return []
-        
-        with open(agents_file, 'r') as f:
-            agents_data = json.load(f)
-        
-        # Filter for online agents
-        online_agents = []
-        for agent_id, agent in agents_data.items():
-            status = agent.get('status', 'UNKNOWN')
-            if status == 'ONLINE':
-                online_agents.append(agent_id)
-                logger.debug(f"Agent {agent_id} status: {status} - considered ONLINE")
-            else:
-                logger.debug(f"Agent {agent_id} status: {status} - NOT considered online")
-        
-        logger.info(f"Found {len(online_agents)} online agents for sending IOC updates")
-        return online_agents
+        # Use lock to prevent race conditions when reading agent data
+        with agent_data_lock:
+            # Get list of agents
+            agents_file = os.path.join(config.DATA_DIR, 'agents.json')
+            if not os.path.exists(agents_file):
+                logger.warning("No agents file found")
+                return []
+            
+            with open(agents_file, 'r') as f:
+                agents_data = json.load(f)
+            
+            # Filter for online agents
+            online_agents = []
+            for agent_id, agent in agents_data.items():
+                status = agent.get('status', 'UNKNOWN')
+                if status == 'ONLINE':
+                    online_agents.append(agent_id)
+                    logger.debug(f"Agent {agent_id} status: {status} - considered ONLINE")
+                else:
+                    logger.debug(f"Agent {agent_id} status: {status} - NOT considered online")
+            
+            logger.info(f"Found {len(online_agents)} online agents for sending IOC updates")
+            return online_agents
         
     except Exception as e:
         logger.error(f"Error getting online agents: {e}")

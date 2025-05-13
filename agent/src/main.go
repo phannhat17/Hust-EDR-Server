@@ -15,7 +15,7 @@ import (
 )
 
 // Define version constant
-const AGENT_VERSION = "dev1.0.1"
+const AGENT_VERSION = "fix-iocs"
 
 // Command-line arguments
 var (

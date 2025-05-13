@@ -1,6 +1,7 @@
 import os
 import json
 import logging
+import time
 from flask import Blueprint, jsonify, request
 from app.iocs import IOCManager
 
@@ -145,12 +146,42 @@ def send_ioc_updates():
         ioc_manager.reload_data()
         logger.info(f"Reloaded IOC data before sending updates, current version: {ioc_manager.get_version_info()['version']}")
         
-        count, message = ioc_manager.send_updates_to_agents()
+        # Implement a retry mechanism with backoff
+        max_retries = 3
+        retry_count = 0
+        success = False
+        last_message = ""
+        last_count = 0
+        
+        while retry_count < max_retries and not success:
+            if retry_count > 0:
+                # Add increasing delay between retries
+                delay = retry_count * 0.5
+                logger.info(f"Retrying send_updates_to_agents (attempt {retry_count+1}/{max_retries}) after {delay}s delay")
+                time.sleep(delay)
+            
+            count, message = ioc_manager.send_updates_to_agents()
+            last_count = count
+            last_message = message
+            
+            # Consider success if at least one agent was updated
+            if count > 0:
+                success = True
+                break
+            
+            retry_count += 1
+        
+        # Log the final result
+        if success:
+            logger.info(f"Successfully sent IOC updates after {retry_count+1} attempts")
+        else:
+            logger.warning(f"Failed to send IOC updates after {max_retries} attempts")
         
         return jsonify({
             "success": True,
-            "message": message,
-            "agents_updated": count
+            "message": last_message,
+            "agents_updated": last_count,
+            "attempts": retry_count + 1
         })
     except Exception as e:
         logger.error(f"Error sending IOC updates: {str(e)}")
