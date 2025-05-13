@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { createFileRoute } from '@tanstack/react-router'
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
@@ -59,6 +59,10 @@ function IOCsPage() {
   const [activeTab, setActiveTab] = useState<IOCType>('ip')
   const [searchQuery, setSearchQuery] = useState('')
   const [showAddDialog, setShowAddDialog] = useState(false)
+  const [showUploadDialog, setShowUploadDialog] = useState(false)
+  const [isProcessingFile, setIsProcessingFile] = useState(false)
+  const [uploadStats, setUploadStats] = useState<{ imported: number, failed: number, duplicates: number } | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
   
   const queryClient = useQueryClient()
   
@@ -213,11 +217,206 @@ function IOCsPage() {
     }
   }
   
+  // Add handleFileUpload function to process uploaded files
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    
+    try {
+      setIsProcessingFile(true)
+      setUploadStats(null)
+      
+      // Read the file as text
+      const fileText = await readFileAsText(file)
+      
+      // Initialize counters
+      let imported = 0
+      let failed = 0
+      let duplicates = 0
+      
+      // Process CSV file
+      const rows = parseCSV(fileText)
+      
+      // Process each row
+      for (let i = 1; i < rows.length; i++) { // Skip header row
+        const row = rows[i]
+        if (row.length < 3) continue // Skip incomplete rows
+        
+        const type = row[0]?.trim().toLowerCase()
+        const value = row[1]?.trim()
+        const description = row[2]?.trim() || ''
+        const severity = (row[3]?.trim().toLowerCase() || 'medium') as SeverityType
+        const hashType = (row[4]?.trim().toLowerCase() || 'sha256') as HashType
+        
+        if (!value) continue // Skip empty values
+        
+        try {
+          // Add IOC based on type
+          if (type === 'ip') {
+            await iocsApi.addIpIOC({ value, description, severity })
+            imported++
+          } else if (type === 'hash') {
+            await iocsApi.addHashIOC({ value, hash_type: hashType, description, severity })
+            imported++
+          } else if (type === 'url') {
+            await iocsApi.addUrlIOC({ value, description, severity })
+            imported++
+          } else {
+            failed++
+            console.error(`Unknown IOC type: ${type}`)
+          }
+        } catch (error: any) {
+          if (error.response?.data?.message?.includes('already exists')) {
+            duplicates++
+          } else {
+            failed++
+            console.error(`Failed to add ${type} ${value}:`, error)
+          }
+        }
+      }
+      
+      // Update stats and UI
+      setUploadStats({ imported, failed, duplicates })
+      
+      // Refresh the data
+      queryClient.invalidateQueries({ queryKey: ['iocs'] })
+      
+      // Show success toast
+      toast({
+        title: 'File processed',
+        description: `${imported} IOCs imported, ${duplicates} duplicates found, ${failed} failed.`,
+      })
+      
+      // Reset file input
+      if (fileInputRef.current) {
+        fileInputRef.current.value = ''
+      }
+    } catch (error) {
+      console.error('Error processing file:', error)
+      toast({
+        title: 'Error',
+        description: 'Failed to process the uploaded file. Make sure it is a valid CSV file.',
+        variant: 'destructive',
+      })
+    } finally {
+      setIsProcessingFile(false)
+    }
+  }
+  
+  // Helper function to read file as text
+  const readFileAsText = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = (event) => {
+        if (event.target?.result) {
+          resolve(event.target.result as string)
+        } else {
+          reject(new Error('Failed to read file'))
+        }
+      }
+      reader.onerror = () => reject(reader.error)
+      reader.readAsText(file)
+    })
+  }
+  
+  // Add CSV parsing function
+  const parseCSV = (text: string): string[][] => {
+    // Split by newlines
+    const rows = text.split(/\r?\n/).filter(row => row.trim().length > 0)
+    
+    // Parse each row, handling quoted values
+    return rows.map(row => {
+      const result: string[] = []
+      let inQuotes = false
+      let currentValue = ''
+      
+      for (let i = 0; i < row.length; i++) {
+        const char = row[i]
+        
+        if (char === '"') {
+          inQuotes = !inQuotes
+        } else if (char === ',' && !inQuotes) {
+          result.push(currentValue)
+          currentValue = ''
+        } else {
+          currentValue += char
+        }
+      }
+      
+      // Add the last value
+      result.push(currentValue)
+      return result
+    })
+  }
+  
   return (
     <>
       <Header>
         <h1 className="text-lg font-semibold">Indicators of Compromise (IOCs)</h1>
         <div className="ml-auto flex items-center space-x-2">
+          <Dialog open={showUploadDialog} onOpenChange={setShowUploadDialog}>
+            <DialogTrigger asChild>
+              <Button variant="outline">
+                <Plus className="h-4 w-4 mr-1" />
+                Import from CSV
+              </Button>
+            </DialogTrigger>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Import IOCs from CSV File</DialogTitle>
+                <DialogDescription>
+                  Upload a CSV file containing IOCs to import.
+                  <br />
+                  <span className="font-semibold mt-2 block">File format:</span>
+                </DialogDescription>
+              </DialogHeader>
+              <div className="py-2">
+                <div className="font-medium mb-1">CSV Format:</div>
+                <pre className="bg-slate-100 dark:bg-slate-800 p-4 rounded-md text-xs overflow-auto">
+{`type,value,description,severity,hash_type
+ip,192.168.1.1,Malicious IP,high
+hash,44d88612fea8a8f36de82e1278abb02f,Malware hash,critical,md5
+url,example.com/malware,Malicious URL,medium`}
+                </pre>
+              </div>
+              <div className="space-y-4">
+                <Label htmlFor="ioc-file">Select file</Label>
+                <Input
+                  ref={fileInputRef}
+                  id="ioc-file" 
+                  type="file" 
+                  accept=".csv"
+                  onChange={handleFileUpload}
+                  disabled={isProcessingFile}
+                />
+                {isProcessingFile && (
+                  <div className="flex items-center space-x-2">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    <span>Processing file...</span>
+                  </div>
+                )}
+                {uploadStats && (
+                  <div className="bg-slate-100 dark:bg-slate-800 p-3 rounded-md text-sm">
+                    <div className="font-medium">Import results:</div>
+                    <ul className="mt-1 space-y-1">
+                      <li className="text-green-600 dark:text-green-400">Imported: {uploadStats.imported}</li>
+                      <li className="text-yellow-600 dark:text-yellow-400">Duplicates: {uploadStats.duplicates}</li>
+                      <li className="text-red-600 dark:text-red-400">Failed: {uploadStats.failed}</li>
+                    </ul>
+                  </div>
+                )}
+              </div>
+              <DialogFooter>
+                <Button 
+                  variant="outline" 
+                  onClick={() => setShowUploadDialog(false)}
+                >
+                  Close
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+
           <Button 
             variant="outline"
             onClick={handleSendUpdates}
