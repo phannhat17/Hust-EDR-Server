@@ -182,9 +182,9 @@ export function isAgentOnline(lastSeen: string | number): boolean {
 
 /**
  * Format agent CPU/memory metric to display as percentage
- * This multiplies the raw value by 100 since the agent sends decimal values (0.302 instead of 30.2%)
+ * The agent already sends values in the 0-100 range, so we just ensure it's defined
  */
 export function formatAgentMetric(value: number | undefined): number {
   if (value === undefined) return 0;
-  return value * 100;
+  return value;
 } 
