@@ -12,7 +12,7 @@ if ($gRPCHost -notlike "*:*") {
 }
 
 # Set download URL and installation paths
-$edrAgentUrl = "https://github.com/phannhat17/Hust-EDR-Server/releases/download/dev-fix-iocs/edr-agent.exe"
+$edrAgentUrl = "http://192.168.133.145:5000/api/install/edr-agent-binary"
 $edrDir = "C:\Program Files\Hust-EDR-Agent"
 $edrExe = "$edrDir\edr-agent.exe"
 $serviceName = "HustEDRAgent"

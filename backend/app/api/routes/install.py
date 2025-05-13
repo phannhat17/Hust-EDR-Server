@@ -1,14 +1,13 @@
 import os
 from flask import Blueprint, send_file, jsonify, make_response, request
+from app.config.config import config
 
 # Create blueprint
 install_bp = Blueprint('install', __name__)
 
 # Path directories
-SCRIPT_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))), 
-                         'install_agent_script')
-CERT_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))), 
-                         'cert')
+SCRIPT_DIR = config.SCRIPT_DIR
+CERT_DIR = config.CERT_DIR
 
 # Certificate routes
 @install_bp.route('/kibana-cert', methods=['GET'])
@@ -81,6 +80,23 @@ def get_edr_agent_script_with_params():
     response = make_response(modified_script)
     response.headers['Content-Type'] = 'text/plain'
     return response
+
+@install_bp.route('/edr-agent-binary', methods=['GET'])
+def get_edr_agent_binary():
+    """Serve the EDR agent executable file for direct download."""
+    binary_path = os.path.join(SCRIPT_DIR, 'edr-agent.exe')
+    
+    # Verify the file exists
+    if not os.path.exists(binary_path):
+        return jsonify({"error": "Agent binary not found"}), 404
+    
+    # Send the file with appropriate headers for download
+    return send_file(
+        binary_path,
+        mimetype='application/octet-stream',
+        as_attachment=True,
+        download_name='edr-agent.exe'
+    )
 
 @install_bp.route('/edr-stack-script', methods=['GET'])
 def get_edr_stack_script():

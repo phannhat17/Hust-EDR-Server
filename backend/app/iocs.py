@@ -63,7 +63,7 @@ class IOCManager:
                     logger.error("Failed to parse IOCs file, using empty database")
         else:
             logger.info("No existing IOCs found, starting with empty database")
-            self._save_iocs()
+            self._save_iocs(increment_version=False)
     
     def _load_version(self):
         """Load version information from file."""
@@ -78,16 +78,22 @@ class IOCManager:
             logger.info("No existing version file, starting with version 1")
             self._save_version()
     
-    def _save_iocs(self):
-        """Save IOCs to file and update version."""
+    def _save_iocs(self, increment_version=False):
+        """Save IOCs to file and optionally update version.
+        
+        Args:
+            increment_version (bool): Whether to increment the version number
+        """
         with open(self.iocs_file, 'w') as f:
             json.dump(self.iocs, f, indent=2)
         
-        # Update version after saving IOCs
-        self.version['version'] += 1
-        self.version['updated_at'] = int(time.time())
-        self.version['hash'] = self._calculate_hash()
-        self._save_version()
+        if increment_version:
+            # Update version after saving IOCs
+            self.version['version'] += 1
+            self.version['updated_at'] = int(time.time())
+            self.version['hash'] = self._calculate_hash()
+            self._save_version()
+            logger.info(f"Incremented IOC version to {self.version['version']}")
         
         logger.info(f"Saved {self._count_iocs()} IOCs to storage (version {self.version['version']})")
             
@@ -132,7 +138,7 @@ class IOCManager:
         }
         
         logger.info(f"Added IP IOC: {ip} ({severity})")
-        self._save_iocs()
+        self._save_iocs(increment_version=False)
         return True
     
     def add_file_hash(self, file_hash, hash_type="sha256", description="", severity="medium"):
@@ -159,7 +165,7 @@ class IOCManager:
         }
         
         logger.info(f"Added {hash_type} hash IOC: {file_hash} ({severity})")
-        self._save_iocs()
+        self._save_iocs(increment_version=False)
         return True
     
     def add_url(self, url, description="", severity="medium"):
@@ -183,7 +189,7 @@ class IOCManager:
         }
         
         logger.info(f"Added URL IOC: {url} ({severity})")
-        self._save_iocs()
+        self._save_iocs(increment_version=False)
         return True
     
     def remove_ioc(self, ioc_type, value):
@@ -199,17 +205,17 @@ class IOCManager:
         if ioc_type == 'ip' and value in self.iocs['ip_addresses']:
             del self.iocs['ip_addresses'][value]
             logger.info(f"Removed IP IOC: {value}")
-            self._save_iocs()
+            self._save_iocs(increment_version=False)
             return True
         elif ioc_type == 'hash' and value in self.iocs['file_hashes']:
             del self.iocs['file_hashes'][value]
             logger.info(f"Removed hash IOC: {value}")
-            self._save_iocs()
+            self._save_iocs(increment_version=False)
             return True
         elif ioc_type == 'url' and value in self.iocs['urls']:
             del self.iocs['urls'][value]
             logger.info(f"Removed URL IOC: {value}")
-            self._save_iocs()
+            self._save_iocs(increment_version=False)
             return True
         else:
             logger.warning(f"IOC not found: {ioc_type}:{value}")

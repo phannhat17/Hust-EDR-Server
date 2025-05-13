@@ -117,9 +117,17 @@ def add_url_ioc():
         logger.error(f"Error adding URL IOC: {str(e)}")
         return jsonify({"success": False, "message": f"Failed to add URL IOC: {str(e)}"}), 500
 
-@iocs_bp.route('/<ioc_type>/<value>', methods=['DELETE'])
-def remove_ioc(ioc_type, value):
-    """Remove an IOC from the database."""
+@iocs_bp.route('/remove', methods=['POST'])
+def remove_ioc_post():
+    """Remove an IOC from the database using POST method (more compatible than DELETE)."""
+    data = request.json
+    
+    if not data or 'type' not in data or 'value' not in data:
+        return jsonify({"success": False, "message": "Missing required fields: type and value"}), 400
+    
+    ioc_type = data['type']
+    value = data['value']
+    
     valid_types = ['ip', 'hash', 'url']
     if ioc_type not in valid_types:
         return jsonify({"success": False, "message": f"Invalid IOC type: {ioc_type}. Must be one of {valid_types}"}), 400
@@ -144,7 +152,11 @@ def send_ioc_updates():
     try:
         # Force reload IOC data from disk first
         ioc_manager.reload_data()
-        logger.info(f"Reloaded IOC data before sending updates, current version: {ioc_manager.get_version_info()['version']}")
+        
+        # Increment version number and save IOCs with new version
+        ioc_manager._save_iocs(increment_version=True)
+        
+        logger.info(f"Incremented IOC version to {ioc_manager.get_version_info()['version']} before sending updates")
         
         # Implement a retry mechanism with backoff
         max_retries = 3

@@ -247,7 +247,11 @@ export const iocsApi = {
   },
   
   removeIOC: async (iocType: 'ip' | 'hash' | 'url', value: string) => {
-    const response = await api.delete(`/api/iocs/${iocType}/${encodeURIComponent(value)}`)
+    // Use POST instead of DELETE for better compatibility
+    const response = await api.post('/api/iocs/remove', {
+      type: iocType,
+      value: value
+    })
     return response.data
   },
   

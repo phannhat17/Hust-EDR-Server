@@ -35,3 +35,4 @@ config.yaml
 .sonar/
 
 sonar-project.properties
+edr-agent.exe
