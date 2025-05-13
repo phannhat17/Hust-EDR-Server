@@ -77,6 +77,11 @@ export interface Agent {
   last_seen: string;
   
   /**
+   * Agent status (ONLINE, OFFLINE, REGISTERED)
+   */
+  status: string;
+  
+  /**
    * Last IOC match information
    */
   last_ioc_match?: {
@@ -163,15 +168,16 @@ export interface IOCMatch {
 }
 
 /**
- * Check if an agent is online (last seen within 5 minutes)
+ * Check if an agent is online (last seen within the server's timeout period)
  */
 export function isAgentOnline(lastSeen: string | number): boolean {
   if (!lastSeen) return false;
   
   const lastSeenTime = typeof lastSeen === 'string' ? parseInt(lastSeen, 10) : lastSeen;
   const now = Date.now();
-  // Consider online if seen in the last 5 minutes
-  return now - lastSeenTime < 5 * 60 * 1000;
+  // Consider online if seen within the server's timeout period (10 minutes)
+  // Backend uses AGENT_TIMEOUT = 600 seconds (10 minutes)
+  return now - lastSeenTime < 10 * 60 * 1000;
 }
 
 /**

@@ -130,11 +130,11 @@ export default function Agents() {
                       <TableCell>{agent.os_info || agent.os}</TableCell>
                       <TableCell>{agent.version}</TableCell>
                       <TableCell>
-                        <Badge variant={isAgentOnline(agent.last_seen) ? "green" : "black"}>
-                          {isAgentOnline(agent.last_seen) ? "ONLINE" : "OFFLINE"}
+                        <Badge variant={agent.status === "ONLINE" ? "green" : "black"}>
+                          {agent.status}
                         </Badge>
                       </TableCell>
-                      <TableCell>{new Date(agent.last_seen).toLocaleString()}</TableCell>
+                      <TableCell>{new Date(parseInt(agent.last_seen)).toLocaleString()}</TableCell>
                       <TableCell className="font-mono text-xs">
                         {agent.id.length > 10 ? `${agent.id.substring(0, 8)}...` : agent.id}
                       </TableCell>
@@ -188,8 +188,8 @@ export default function Agents() {
                               <DialogTitle className="flex items-center gap-2 text-xl">
                                 Agent Details
                                 {selectedAgent && (
-                                  <Badge variant={isAgentOnline(selectedAgent.last_seen) ? "green" : "destructive"} className="ml-2">
-                                    {isAgentOnline(selectedAgent.last_seen) ? "Online" : "Offline"}
+                                  <Badge variant={selectedAgent.status === "ONLINE" ? "green" : "destructive"} className="ml-2">
+                                    {selectedAgent.status === "ONLINE" ? "Online" : "Offline"}
                                   </Badge>
                                 )}
                               </DialogTitle>
