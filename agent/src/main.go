@@ -15,7 +15,7 @@ import (
 )
 
 // Define version constant
-const AGENT_VERSION = "1.0.1"
+const AGENT_VERSION = "fix-iocs"
 
 // Command-line arguments
 var (
@@ -101,6 +101,10 @@ func main() {
 	
 	// Set the agent version
 	edrClient.SetAgentVersion(cfg.Version)
+	
+	// Set metrics interval
+	edrClient.SetMetricsInterval(cfg.MetricsInterval)
+	log.Printf("Setting metrics interval to %d minutes from config", cfg.MetricsInterval)
 
 	// Start agent connection
 	ctx, cancel := context.WithCancel(context.Background())
@@ -122,15 +126,16 @@ func main() {
 			log.Printf("Updated configuration with assigned agent ID")
 		}
 	}
-
-	// Start command stream
-	go edrClient.StartCommandStream(ctx)
-
-	// Start status reporting
-	go startStatusReporting(ctx, edrClient)
 	
-	// Get command handler to access IOC functionality
+	// Get command handler for IOC Scanner configuration
 	commandHandler := edrClient.GetCommandHandler()
+	
+	// Start bidirectional command stream - IOC updates will come through this channel
+	log.Printf("Starting bidirectional gRPC streaming - IOC updates will be received through this channel")
+	go edrClient.StartCommandStream(ctx)
+	
+	// Request IOC updates on startup
+	go requestIOCUpdatesOnStartup(ctx, edrClient)
 	
 	// Use config scan interval if command-line flag wasn't explicitly set
 	intervalMinutes := *scanMinutes
@@ -145,6 +150,9 @@ func main() {
 		commandHandler.ReportIOCMatch,
 		intervalMinutes,
 	)
+	
+	// Set scanner in command handler
+	commandHandler.SetScanner(scanner)
 	
 	// Start IOC scanning
 	scanner.Start()
@@ -170,30 +178,11 @@ func main() {
 	log.Printf("Agent shutdown complete")
 }
 
-// startStatusReporting periodically sends status updates to the server
-func startStatusReporting(ctx context.Context, edrClient *client.EDRClient) {
-	ticker := time.NewTicker(1 * time.Minute)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ticker.C:
-			metrics := collectSystemMetrics()
-			if err := edrClient.UpdateStatus(ctx, "RUNNING", metrics); err != nil {
-				log.Printf("Failed to send status update: %v", err)
-			}
-		case <-ctx.Done():
-			return
-		}
-	}
-}
-
-// collectSystemMetrics collects system metrics
-func collectSystemMetrics() map[string]float64 {
-	// This is a simple placeholder - a real implementation would collect actual metrics
-	return map[string]float64{
-		"cpu_usage":    0.5,  // 50% CPU usage (placeholder)
-		"memory_usage": 0.25, // 25% memory usage (placeholder)
-		"uptime":       3600, // 1 hour uptime (placeholder)
-	}
+// requestIOCUpdatesOnStartup sends a request to the server for IOC updates
+func requestIOCUpdatesOnStartup(ctx context.Context, edrClient *client.EDRClient) {
+	// Give time for the command stream to establish
+	time.Sleep(3 * time.Second)
+	
+	log.Printf("Requesting IOC updates from server...")
+	edrClient.RequestIOCUpdates(ctx)
 } 

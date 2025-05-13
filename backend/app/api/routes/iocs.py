@@ -1,6 +1,7 @@
 import os
 import json
 import logging
+import time
 from flask import Blueprint, jsonify, request
 from app.iocs import IOCManager
 
@@ -55,6 +56,9 @@ def add_ip_ioc():
         if not success:
             return jsonify({"success": False, "message": "Invalid IP format"}), 400
         
+        # Force reload after adding IOC
+        ioc_manager.reload_data()
+        
         return jsonify({"success": True, "message": f"Added IP IOC: {data['value']}"})
     except Exception as e:
         logger.error(f"Error adding IP IOC: {str(e)}")
@@ -82,6 +86,9 @@ def add_file_hash_ioc():
         if not success:
             return jsonify({"success": False, "message": f"Invalid {data['hash_type']} hash format"}), 400
         
+        # Force reload after adding IOC
+        ioc_manager.reload_data()
+        
         return jsonify({"success": True, "message": f"Added file hash IOC: {data['value']}"})
     except Exception as e:
         logger.error(f"Error adding file hash IOC: {str(e)}")
@@ -102,6 +109,9 @@ def add_url_ioc():
             severity=data.get('severity', 'medium')
         )
         
+        # Force reload after adding IOC
+        ioc_manager.reload_data()
+        
         return jsonify({"success": True, "message": f"Added URL IOC: {data['value']}"})
     except Exception as e:
         logger.error(f"Error adding URL IOC: {str(e)}")
@@ -120,7 +130,62 @@ def remove_ioc(ioc_type, value):
         if not success:
             return jsonify({"success": False, "message": f"IOC not found: {ioc_type}:{value}"}), 404
         
+        # Force reload after removing IOC
+        ioc_manager.reload_data()
+        
         return jsonify({"success": True, "message": f"Removed {ioc_type} IOC: {value}"})
     except Exception as e:
         logger.error(f"Error removing IOC: {str(e)}")
-        return jsonify({"success": False, "message": f"Failed to remove IOC: {str(e)}"}), 500 
+        return jsonify({"success": False, "message": f"Failed to remove IOC: {str(e)}"}), 500
+
+@iocs_bp.route('/send-updates', methods=['POST'])
+def send_ioc_updates():
+    """Send IOC updates to all connected agents."""
+    try:
+        # Force reload IOC data from disk first
+        ioc_manager.reload_data()
+        logger.info(f"Reloaded IOC data before sending updates, current version: {ioc_manager.get_version_info()['version']}")
+        
+        # Implement a retry mechanism with backoff
+        max_retries = 3
+        retry_count = 0
+        success = False
+        last_message = ""
+        last_count = 0
+        
+        while retry_count < max_retries and not success:
+            if retry_count > 0:
+                # Add increasing delay between retries
+                delay = retry_count * 0.5
+                logger.info(f"Retrying send_updates_to_agents (attempt {retry_count+1}/{max_retries}) after {delay}s delay")
+                time.sleep(delay)
+            
+            count, message = ioc_manager.send_updates_to_agents()
+            last_count = count
+            last_message = message
+            
+            # Consider success if at least one agent was updated
+            if count > 0:
+                success = True
+                break
+            
+            retry_count += 1
+        
+        # Log the final result
+        if success:
+            logger.info(f"Successfully sent IOC updates after {retry_count+1} attempts")
+        else:
+            logger.warning(f"Failed to send IOC updates after {max_retries} attempts")
+        
+        return jsonify({
+            "success": True,
+            "message": last_message,
+            "agents_updated": last_count,
+            "attempts": retry_count + 1
+        })
+    except Exception as e:
+        logger.error(f"Error sending IOC updates: {str(e)}")
+        return jsonify({
+            "success": False, 
+            "message": f"Failed to send IOC updates: {str(e)}"
+        }), 500 

@@ -6,6 +6,8 @@ import (
 	"io"
 	"log"
 	"math"
+	"math/rand"
+	"sync"
 	"time"
 
 	"google.golang.org/grpc"
@@ -13,19 +15,29 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"crypto/tls"
 
+	"github.com/shirou/gopsutil/v3/cpu"
+	"github.com/shirou/gopsutil/v3/mem"
+	"github.com/shirou/gopsutil/v3/host"
+
 	pb "agent/proto"
 )
 
+// Initialize random number generator on package import
+func init() {
+	rand.Seed(time.Now().UnixNano())
+}
+
 // EDRClient represents a client for communicating with the EDR server
 type EDRClient struct {
-	serverAddress string
-	agentID       string
-	conn          *grpc.ClientConn
-	edrClient     pb.EDRServiceClient
-	cmdHandler    *CommandHandler
-	agentVersion  string
-	dataDir       string
-	useTLS        bool
+	serverAddress   string
+	agentID         string
+	conn            *grpc.ClientConn
+	edrClient       pb.EDRServiceClient
+	cmdHandler      *CommandHandler
+	agentVersion    string
+	dataDir         string
+	useTLS          bool
+	metricsInterval int
 }
 
 // NewEDRClient creates a new EDR client
@@ -80,6 +92,17 @@ func NewEDRClientWithTLS(serverAddress, agentID string, dataDir string, useTLS b
 // SetAgentVersion sets the agent version
 func (c *EDRClient) SetAgentVersion(version string) {
 	c.agentVersion = version
+}
+
+// SetMetricsInterval sets the system metrics update interval in minutes
+func (c *EDRClient) SetMetricsInterval(interval int) {
+	if interval <= 0 {
+		c.metricsInterval = 2 // Default to 2 minutes
+		log.Printf("WARNING: Invalid metrics interval %d specified, defaulting to %d minutes", interval, c.metricsInterval)
+	} else {
+		c.metricsInterval = interval
+		log.Printf("Setting metrics interval to %d minutes", interval)
+	}
 }
 
 // Register registers the agent with the server
@@ -153,10 +176,10 @@ func (c *EDRClient) Register(ctx context.Context) (*AgentInfo, error) {
 
 // UpdateStatus sends a status update to the server
 func (c *EDRClient) UpdateStatus(ctx context.Context, status string, metrics map[string]float64) error {
-	// Create system metrics
+	// Create system metrics - convert from 0-1 to 0-100 percentage scale for the API
 	sysMetrics := &pb.SystemMetrics{
-		CpuUsage:    metrics["cpu_usage"],
-		MemoryUsage: metrics["memory_usage"],
+		CpuUsage:    metrics["cpu_usage"] * 100,
+		MemoryUsage: metrics["memory_usage"] * 100,
 		Uptime:      int64(metrics["uptime"]),
 	}
 
@@ -181,7 +204,7 @@ func (c *EDRClient) UpdateStatus(ctx context.Context, status string, metrics map
 	return nil
 }
 
-// StartCommandStream starts a stream to receive commands from the server
+// StartCommandStream starts a bidirectional stream for agent-server communication
 func (c *EDRClient) StartCommandStream(ctx context.Context) {
 	// Track failed connection attempts for backoff strategy
 	consecutiveFailures := 0
@@ -196,15 +219,9 @@ func (c *EDRClient) StartCommandStream(ctx context.Context) {
 			// Calculate backoff time based on consecutive failures
 			backoffTime := time.Duration(math.Min(float64(5*consecutiveFailures), float64(maxBackoff.Seconds()))) * time.Second
 			
-			// Create command stream request
-			req := &pb.CommandRequest{
-				AgentId:   c.agentID,
-				Timestamp: time.Now().Unix(),
-			}
-
-			// Start command stream
-			stream, err := c.edrClient.ReceiveCommands(ctx, req)
-	if err != nil {
+			// Open bidirectional stream
+			stream, err := c.edrClient.CommandStream(ctx)
+			if err != nil {
 				consecutiveFailures++
 				log.Printf("Failed to start command stream (attempt #%d): %v", consecutiveFailures, err)
 				log.Printf("Will retry in %v seconds", backoffTime.Seconds())
@@ -215,43 +232,388 @@ func (c *EDRClient) StartCommandStream(ctx context.Context) {
 			// Reset failure counter on successful connection
 			consecutiveFailures = 0
 			log.Println("Command stream established")
-
-			// Process commands from stream
-			for {
-				cmd, err := stream.Recv()
-				if err != nil {
-					if err == io.EOF {
-						log.Println("Command stream ended by server")
-					} else {
-						log.Printf("Command stream error: %v", err)
-					}
-					break
-				}
-
-				log.Printf("Received command: %s (Type: %s)", cmd.CommandId, cmd.Type.String())
-
-				// Process command in a separate goroutine
-				go func(command *pb.Command) {
-					// Execute command
-					result := c.cmdHandler.HandleCommand(ctx, command)
-
-					// Report result
-					_, err := c.edrClient.ReportCommandResult(ctx, result)
-	if err != nil {
-						log.Printf("Failed to report command result: %v", err)
-	}
-				}(cmd)
+			
+			// Send initial HELLO message
+			helloMsg := &pb.CommandMessage{
+				AgentId:     c.agentID,
+				Timestamp:   time.Now().Unix(),
+				MessageType: pb.MessageType_AGENT_HELLO,
+				Payload: &pb.CommandMessage_Hello{
+					Hello: &pb.AgentHello{
+						AgentId:   c.agentID,
+						Timestamp: time.Now().Unix(),
+					},
+				},
+			}
+			
+			if err := stream.Send(helloMsg); err != nil {
+				log.Printf("Failed to send HELLO message: %v", err)
+				stream.CloseSend()
+				time.Sleep(5 * time.Second)
+				continue
 			}
 
-			// Wait before reconnecting
-			time.Sleep(5 * time.Second)
+			// Create a context that can be cancelled to coordinate goroutines
+			streamCtx, cancelStream := context.WithCancel(ctx)
+			defer cancelStream()
+			
+			// Create a WaitGroup to coordinate goroutines
+			var wg sync.WaitGroup
+			
+			// Add streamWatcher to coordinate stream closure
+			streamClosed := make(chan struct{})
+			
+			// Start goroutine to handle incoming messages
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				defer close(streamClosed) // Signal that the stream is closed
+				
+				for {
+					message, err := stream.Recv()
+					if err != nil {
+						if err == io.EOF {
+							log.Println("Command stream closed by server")
+						} else {
+							log.Printf("Error receiving message: %v", err)
+						}
+						// Cancel the stream context to signal all goroutines to stop
+						cancelStream()
+						return
+					}
+					
+					// Process different message types
+					switch message.MessageType {
+					case pb.MessageType_AGENT_HELLO:
+						// Server acknowledgment of our HELLO
+						log.Printf("Server acknowledged connection for agent %s", message.AgentId)
+						
+					case pb.MessageType_SERVER_COMMAND:
+						// Handle command from server
+						cmd := message.GetCommand()
+						if cmd == nil {
+							log.Println("Received SERVER_COMMAND message with no command payload")
+							continue
+						}
+						
+						log.Printf("Received command: %s (Type: %s)", cmd.CommandId, cmd.Type.String())
+						
+						// Process command in a separate goroutine
+						go func(command *pb.Command) {
+							// Special handling for UPDATE_IOCS command
+							// For this command, we'll wait for the IOC_DATA message that follows
+							// rather than making a separate RPC call
+							if command.Type == pb.CommandType_UPDATE_IOCS {
+								log.Printf("Received IOC update command, waiting for IOC data in stream...")
+								// For UPDATE_IOCS, just acknowledge receipt
+								// The actual data will come through IOC_DATA message
+								result := &pb.CommandResult{
+									CommandId:     command.CommandId,
+									AgentId:       command.AgentId,
+									ExecutionTime: time.Now().Unix(),
+									Success:       true,
+									Message:       "UPDATE_IOCS command received, waiting for data",
+								}
+								
+								// Send result
+								resultMsg := &pb.CommandMessage{
+									AgentId:     c.agentID,
+									Timestamp:   time.Now().Unix(),
+									MessageType: pb.MessageType_COMMAND_RESULT,
+									Payload: &pb.CommandMessage_Result{
+										Result: result,
+									},
+								}
+								
+								if err := stream.Send(resultMsg); err != nil {
+									log.Printf("Failed to send command result: %v", err)
+								}
+								// Don't process further - wait for IOC_DATA message
+								return
+							}
+							
+							// For all other command types, process normally
+							// Execute command
+							result := c.cmdHandler.HandleCommand(ctx, command)
+							
+							// Check if stream is still active before sending
+							select {
+							case <-streamClosed:
+								log.Printf("Stream closed, command result for %s not sent", command.CommandId)
+								return
+							default:
+								// Send result through bidirectional stream
+								resultMsg := &pb.CommandMessage{
+									AgentId:     c.agentID,
+									Timestamp:   time.Now().Unix(),
+									MessageType: pb.MessageType_COMMAND_RESULT,
+									Payload: &pb.CommandMessage_Result{
+										Result: result,
+									},
+								}
+								
+								if err := stream.Send(resultMsg); err != nil {
+									log.Printf("Failed to send command result: %v", err)
+								}
+							}
+						}(cmd)
+					
+					case pb.MessageType_IOC_DATA:
+						// Handle IOC data from server
+						iocData := message.GetIocData()
+						if iocData == nil {
+							log.Println("Received IOC_DATA message with no IOC payload")
+							continue
+						}
+						
+						log.Printf("Received IOC data: version %d, %d IPs, %d file hashes, %d URLs", 
+							iocData.Version, len(iocData.IpAddresses), len(iocData.FileHashes), len(iocData.Urls))
+						
+						// Process IOC data in a separate goroutine
+						go func(data *pb.IOCResponse) {
+							// Get command handler to access IOC manager
+							handler := c.GetCommandHandler()
+							if handler == nil {
+								log.Printf("ERROR: Command handler not available")
+								return
+							}
+							
+							// Get IOC manager
+							iocManager := handler.GetIOCManager()
+							if iocManager == nil {
+								log.Printf("ERROR: IOC manager not available")
+								return
+							}
+							
+							// Get current version
+							currentVersion := iocManager.GetVersion()
+							if data.Version <= currentVersion {
+								log.Printf("Received IOC version %d is not newer than current version %d, ignoring", 
+									data.Version, currentVersion)
+								return
+							}
+							
+							// Process the IOC data
+							log.Printf("Processing IOC update to version %d", data.Version)
+							
+							// Clear existing IOCs
+							iocManager.ClearAll()
+							
+							// Add IP addresses
+							for ip, iocData := range data.IpAddresses {
+								iocManager.AddIP(ip, iocData.Description, iocData.Severity)
+							}
+							
+							// Add file hashes
+							for hash, iocData := range data.FileHashes {
+								hashType := "sha256" // Default
+								if val, ok := iocData.Metadata["hash_type"]; ok {
+									hashType = val
+								}
+								iocManager.AddFileHash(hash, hashType, iocData.Description, iocData.Severity)
+							}
+							
+							// Add URLs
+							for url, iocData := range data.Urls {
+								iocManager.AddURL(url, iocData.Description, iocData.Severity)
+							}
+							
+							// Update version
+							iocManager.SetVersion(data.Version)
+							
+							// Save IOCs to disk
+							if err := iocManager.SaveToFile(); err != nil {
+								log.Printf("ERROR: Failed to save IOCs to disk: %v", err)
+								return
+							}
+							
+							log.Printf("Successfully updated IOCs to version %d", data.Version)
+							
+							// Trigger immediate scan
+							scanner := handler.GetScanner()
+							if scanner != nil {
+								log.Printf("Triggering immediate IOC scan after update")
+								scanner.TriggerScan()
+							} else {
+								log.Printf("WARNING: Cannot trigger IOC scan, scanner not available")
+							}
+						}(iocData)
+					}
+				}
+			}()
+			
+			// Start goroutine to send periodic status updates
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				
+				// Use the metrics interval from config (in minutes)
+				log.Printf("Creating status ticker with interval of %d minutes", c.metricsInterval)
+				statusTicker := time.NewTicker(time.Duration(c.metricsInterval) * time.Minute)
+				defer statusTicker.Stop()
+				
+				// Send an initial status update immediately
+				sendStatusUpdate(c, stream, streamClosed, cancelStream)
+				
+				for {
+					select {
+					case <-statusTicker.C:
+						sendStatusUpdate(c, stream, streamClosed, cancelStream)
+					case <-streamCtx.Done():
+						return
+					}
+				}
+			}()
+			
+			// Wait for all goroutines to finish (this happens when streamCtx is cancelled)
+			wg.Wait()
+			
+			// Properly close the stream if it hasn't been closed already
+			stream.CloseSend()
+			
+			// Check if the parent context was cancelled
+			select {
+			case <-ctx.Done():
+				log.Println("Parent context cancelled, stopping reconnect attempts")
+				return
+			default:
+				// Wait before reconnecting
+				log.Println("Will attempt to reconnect command stream in 5 seconds")
+				time.Sleep(5 * time.Second)
+			}
 		}
 	}
+}
+
+// Helper function to send status updates
+func sendStatusUpdate(c *EDRClient, stream pb.EDRService_CommandStreamClient, streamClosed chan struct{}, cancelStream context.CancelFunc) {
+	// Check if stream is still active before sending status
+	select {
+	case <-streamClosed:
+		return
+	default:
+		// Collect system metrics
+		metrics := map[string]float64{
+			"cpu_usage":    getCPUUsage(),
+			"memory_usage": getMemoryUsage(),
+			"uptime":       float64(getUptime()),
+		}
+		
+		// Log that we're sending status update with proper percentage formatting
+		log.Printf("Sending status update with metrics: CPU: %.2f%%, Memory: %.2f%%, Uptime: %.0fs", 
+			metrics["cpu_usage"]*100, metrics["memory_usage"]*100, metrics["uptime"])
+		
+		// Create status message - note that ServerMetrics expects values as percentages (0-100)
+		statusReq := &pb.StatusRequest{
+			AgentId:   c.agentID,
+			Timestamp: time.Now().Unix(),
+			Status:    "ONLINE",
+			SystemMetrics: &pb.SystemMetrics{
+				CpuUsage:    metrics["cpu_usage"]*100,  // Convert from 0-1 to 0-100 scale
+				MemoryUsage: metrics["memory_usage"]*100, // Convert from 0-1 to 0-100 scale
+				Uptime:      int64(metrics["uptime"]),
+			},
+		}
+		
+		statusMsg := &pb.CommandMessage{
+			AgentId:     c.agentID,
+			Timestamp:   time.Now().Unix(),
+			MessageType: pb.MessageType_AGENT_STATUS,
+			Payload: &pb.CommandMessage_Status{
+				Status: statusReq,
+			},
+		}
+		
+		if err := stream.Send(statusMsg); err != nil {
+			log.Printf("Failed to send status update: %v", err)
+			cancelStream() // Cancel context to signal all goroutines to stop
+			return
+		}
+	}
+}
+
+// Global variable for tracking start time
+var (
+	processStartTime time.Time
+	startTimeOnce    sync.Once
+)
+
+// Helper functions for system metrics
+func getCPUUsage() float64 {
+	// Get actual CPU usage using gopsutil
+	percentages, err := cpu.Percent(time.Second/2, false)  // 500ms sample, average across all cores
+	if err != nil || len(percentages) == 0 {
+		log.Printf("Warning: failed to get CPU usage: %v", err)
+		return 0.1 // Default fallback value if monitoring fails
+	}
+	
+	// Return as decimal (0.0-1.0) instead of percentage
+	return percentages[0] / 100.0
+}
+
+func getMemoryUsage() float64 {
+	// Get actual memory usage using gopsutil
+	vmStat, err := mem.VirtualMemory()
+	if err != nil {
+		log.Printf("Warning: failed to get memory usage: %v", err)
+		return 0.2 // Default fallback value if monitoring fails
+	}
+	
+	// Return as decimal (0.0-1.0)
+	return float64(vmStat.UsedPercent) / 100.0
+}
+
+func getUptime() int64 {
+	// Get actual system uptime using gopsutil
+	uptime, err := host.Uptime()
+	if err != nil {
+		// Fall back to process uptime if system uptime fails
+		log.Printf("Warning: failed to get system uptime: %v", err)
+		// Initialize start time only once (original behavior)
+		startTimeOnce.Do(func() {
+			processStartTime = time.Now()
+		})
+		
+		// Return process uptime in seconds
+		return int64(time.Since(processStartTime).Seconds())
+	}
+	
+	return int64(uptime)
 }
 
 // GetCommandHandler returns the command handler
 func (c *EDRClient) GetCommandHandler() *CommandHandler {
 	return c.cmdHandler
+}
+
+// RequestIOCUpdates sends a request to the server to get the latest IOC data
+func (c *EDRClient) RequestIOCUpdates(ctx context.Context) {
+	log.Printf("Requesting IOC updates from server via command stream...")
+	
+	// Send the message through the SendCommand RPC
+	cmd := &pb.SendCommandRequest{
+		Command: &pb.Command{
+			CommandId: fmt.Sprintf("req-ioc-%d", time.Now().UnixNano()),
+			AgentId:   c.agentID,
+			Timestamp: time.Now().Unix(),
+			Type:      pb.CommandType_UPDATE_IOCS,
+			Params:    map[string]string{"request_type": "initial"},
+			Priority:  1,
+		},
+	}
+	
+	// Send the command to request IOC updates
+	resp, err := c.edrClient.SendCommand(ctx, cmd)
+	if err != nil {
+		log.Printf("Failed to request IOC updates: %v", err)
+		return
+	}
+	
+	if resp.Success {
+		log.Printf("IOC update request sent successfully: %s", resp.Message)
+	} else {
+		log.Printf("IOC update request failed: %s", resp.Message)
+	}
 }
 
 // Close closes the client connection

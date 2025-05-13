@@ -19,16 +19,22 @@ import (
 type CommandHandler struct {
 	client *EDRClient
 	iocManager *ioc.Manager
+	scanner    *ioc.Scanner
 }
 
 // NewCommandHandler creates a new command handler
 func NewCommandHandler(client *EDRClient) *CommandHandler {
-	// Use the data directory from the client's configuration
-	iocsPath := filepath.Join(client.dataDir, "iocs")
+	// Create IOC manager
+	iocManager := ioc.NewManager(filepath.Join(client.dataDir, "iocs"))
+	
+	// Load existing IOCs
+	if err := iocManager.LoadFromFile(); err != nil {
+		log.Printf("Warning: failed to load IOCs: %v", err)
+	}
 	
 	return &CommandHandler{
-		client: client,
-		iocManager: ioc.NewManager(iocsPath),
+		client:     client,
+		iocManager: iocManager,
 	}
 }
 
@@ -79,7 +85,8 @@ func (h *CommandHandler) HandleCommand(ctx context.Context, cmd *pb.Command) *pb
 		message, err = h.handleNetworkRestore(cmd.Params)
 	case pb.CommandType_UPDATE_IOCS:
 		log.Printf("DEBUG: Matched UPDATE_IOCS type (value: %d)", int(pb.CommandType_UPDATE_IOCS))
-		message, err = h.handleUpdateIOCs(ctx)
+		// Updates now come directly through the command stream
+		message = "UPDATE_IOCS command acknowledged. IOC data will be received through the command stream."
 	default:
 		log.Printf("ERROR: Unknown command type: %d (%s)", int(cmd.Type), cmd.Type.String())
 		err = fmt.Errorf("unknown command type: %s", cmd.Type.String())
@@ -101,74 +108,27 @@ func (h *CommandHandler) HandleCommand(ctx context.Context, cmd *pb.Command) *pb
 	return result
 }
 
-// handleUpdateIOCs updates the IOC database from the server
-func (h *CommandHandler) handleUpdateIOCs(ctx context.Context) (string, error) {
-	log.Printf("Updating IOCs from server")
-	
-	// Get current version from local IOC manager
-	currentVersion := h.iocManager.GetVersion()
-	log.Printf("Current IOC version: %d", currentVersion)
-	
-	// Create IOC request
-	req := &pb.IOCRequest{
-		AgentId:         h.client.agentID,
-		CurrentVersion:  currentVersion,
-		RequestedTypes:  []pb.IOCType{pb.IOCType_IOC_IP, pb.IOCType_IOC_HASH, pb.IOCType_IOC_URL},
-	}
-	
-	// Send request to server
-	resp, err := h.client.edrClient.GetIOCs(ctx, req)
-	if err != nil {
-		return "", fmt.Errorf("failed to get IOCs from server: %v", err)
-	}
-	
-	// Check if update is available
-	if !resp.UpdateAvailable {
-		log.Printf("No IOC update available, server version: %d", resp.Version)
-		return fmt.Sprintf("No IOC update available, server version: %d", resp.Version), nil
-	}
-	
-	log.Printf("Received IOC update, server version: %d", resp.Version)
-	log.Printf("Received %d IPs, %d file hashes, %d URLs", 
-		len(resp.IpAddresses), len(resp.FileHashes), len(resp.Urls))
-	
-	// Clear existing IOCs
-	h.iocManager.ClearAll()
-	
-	// Add IP addresses
-	for ip, iocData := range resp.IpAddresses {
-		h.iocManager.AddIP(ip, iocData.Description, iocData.Severity)
-	}
-	
-	// Add file hashes
-	for hash, iocData := range resp.FileHashes {
-		hashType := "sha256" // Default
-		if val, ok := iocData.Metadata["hash_type"]; ok {
-			hashType = val
-		}
-		h.iocManager.AddFileHash(hash, hashType, iocData.Description, iocData.Severity)
-	}
-	
-	// Add URLs
-	for url, iocData := range resp.Urls {
-		h.iocManager.AddURL(url, iocData.Description, iocData.Severity)
-	}
-	
-	// Update version
-	h.iocManager.SetVersion(resp.Version)
-	
-	// Save IOCs to disk
-	if err := h.iocManager.SaveToFile(); err != nil {
-		return "", fmt.Errorf("failed to save IOCs to disk: %v", err)
-	}
-	
-	return fmt.Sprintf("Updated IOCs to version %d: %d IPs, %d file hashes, %d URLs", 
-		resp.Version, len(resp.IpAddresses), len(resp.FileHashes), len(resp.Urls)), nil
-}
-
 // GetIOCManager returns the IOC manager instance
 func (h *CommandHandler) GetIOCManager() *ioc.Manager {
 	return h.iocManager
+}
+
+// SetScanner sets the IOC scanner instance
+func (h *CommandHandler) SetScanner(scanner *ioc.Scanner) {
+	h.scanner = scanner
+}
+
+// GetScanner returns the IOC scanner instance
+func (h *CommandHandler) GetScanner() *ioc.Scanner {
+	return h.scanner
+}
+
+// UpdateIOCs updates the IOC database from the server
+func (h *CommandHandler) UpdateIOCs(ctx context.Context) (string, error) {
+	// With the integrated command stream approach, we don't need to make separate RPC calls
+	// IOC updates are now received directly through the CommandStream
+	log.Printf("IOC updates are now handled directly through the command stream")
+	return "IOC updates are now handled automatically through the command stream", nil
 }
 
 // ReportIOCMatch sends an IOC match report to the server

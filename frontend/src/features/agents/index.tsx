@@ -12,7 +12,7 @@ import { Header } from '@/components/layout/header'
 import { Main } from '@/components/layout/main'
 import { TopNav } from '@/components/layout/top-nav'
 import { agentsApi } from '@/lib/api'
-import { Agent, IOCMatch, SeverityLevel } from '@/types/agent'
+import { Agent, IOCMatch, SeverityLevel, formatAgentMetric } from '@/types/agent'
 import {
   Table,
   TableBody,
@@ -44,7 +44,7 @@ function getSeverityBadge(severity: SeverityLevel | string) {
     
   switch (severity.toLowerCase()) {
     case 'critical':
-      return <Badge variant="destructive">Critical</Badge>
+      return <Badge variant="black">Critical</Badge>
     case 'high':
       return <Badge variant="destructive">High</Badge>
     case 'medium':
@@ -130,11 +130,11 @@ export default function Agents() {
                       <TableCell>{agent.os_info || agent.os}</TableCell>
                       <TableCell>{agent.version}</TableCell>
                       <TableCell>
-                        <Badge variant={isAgentOnline(agent.last_seen) ? "green" : "black"}>
-                          {isAgentOnline(agent.last_seen) ? "ONLINE" : "OFFLINE"}
+                        <Badge variant={agent.status === "ONLINE" ? "green" : "black"}>
+                          {agent.status}
                         </Badge>
                       </TableCell>
-                      <TableCell>{new Date(agent.last_seen).toLocaleString()}</TableCell>
+                      <TableCell>{new Date(parseInt(agent.last_seen)).toLocaleString()}</TableCell>
                       <TableCell className="font-mono text-xs">
                         {agent.id.length > 10 ? `${agent.id.substring(0, 8)}...` : agent.id}
                       </TableCell>
@@ -188,8 +188,8 @@ export default function Agents() {
                               <DialogTitle className="flex items-center gap-2 text-xl">
                                 Agent Details
                                 {selectedAgent && (
-                                  <Badge variant={isAgentOnline(selectedAgent.last_seen) ? "green" : "destructive"} className="ml-2">
-                                    {isAgentOnline(selectedAgent.last_seen) ? "Online" : "Offline"}
+                                  <Badge variant={selectedAgent.status === "ONLINE" ? "green" : "destructive"} className="ml-2">
+                                    {selectedAgent.status === "ONLINE" ? "Online" : "Offline"}
                                   </Badge>
                                 )}
                               </DialogTitle>
@@ -245,11 +245,11 @@ export default function Agents() {
                                       <div className="grid grid-cols-3 gap-4 mt-2">
                                         <div className="bg-slate-50 dark:bg-slate-900 p-3 rounded-md">
                                           <h4 className="text-sm font-semibold text-muted-foreground">CPU Usage</h4>
-                                          <p className="text-lg font-medium">{selectedAgent.cpu_usage !== undefined ? `${selectedAgent.cpu_usage.toFixed(1)}%` : 'N/A'}</p>
+                                          <p className="text-lg font-medium">{selectedAgent.cpu_usage !== undefined ? `${formatAgentMetric(selectedAgent.cpu_usage).toFixed(1)}%` : 'N/A'}</p>
                                         </div>
                                         <div className="bg-slate-50 dark:bg-slate-900 p-3 rounded-md">
                                           <h4 className="text-sm font-semibold text-muted-foreground">Memory Usage</h4>
-                                          <p className="text-lg font-medium">{selectedAgent.memory_usage !== undefined ? `${selectedAgent.memory_usage.toFixed(1)}%` : 'N/A'}</p>
+                                          <p className="text-lg font-medium">{selectedAgent.memory_usage !== undefined ? `${formatAgentMetric(selectedAgent.memory_usage).toFixed(1)}%` : 'N/A'}</p>
                                         </div>
                                         <div className="bg-slate-50 dark:bg-slate-900 p-3 rounded-md">
                                           <h4 className="text-sm font-semibold text-muted-foreground">Uptime</h4>

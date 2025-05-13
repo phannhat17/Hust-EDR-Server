@@ -6,17 +6,14 @@ import uuid
 import grpc
 from flask import Blueprint, jsonify, request, current_app
 from app.grpc import agent_pb2, agent_pb2_grpc
+from app.config.config import config
+from app.utils.agent_commands import create_grpc_client, send_command_to_agent
 
 # Set up logger
 logger = logging.getLogger(__name__)
 
 # Create commands routes blueprint
 commands_bp = Blueprint('commands', __name__, url_prefix='/api/commands')
-
-def create_grpc_client():
-    """Create a gRPC client for command services."""
-    channel = grpc.insecure_channel('localhost:50051')
-    return agent_pb2_grpc.EDRServiceStub(channel)
 
 @commands_bp.route('', methods=['GET'])
 def get_commands():
@@ -131,38 +128,26 @@ def send_command():
             
         if agent_id not in agents_data:
             return jsonify({"error": f"Agent with ID {agent_id} does not exist"}), 404
-            
-        # Create client
-        client = create_grpc_client()
         
-        # Create command
-        command_id = str(uuid.uuid4())
-        timestamp = int(time.time())
-        
-        command = agent_pb2.Command(
-            command_id=command_id,
+        # Send command to agent
+        success, message, command_id = send_command_to_agent(
             agent_id=agent_id,
-            timestamp=timestamp,
-            type=command_type,
+            command_type=command_type,
             params=params,
             priority=data.get('priority', 1),
             timeout=data.get('timeout', 60)
         )
         
-        # Send command to server
-        request_obj = agent_pb2.SendCommandRequest(command=command)
-        response = client.SendCommand(request_obj)
-        
-        if response.success:
+        if success:
             return jsonify({
                 "success": True,
                 "command_id": command_id,
-                "message": response.message
+                "message": message
             })
         else:
             return jsonify({
                 "success": False,
-                "message": response.message
+                "message": message
             }), 500
             
     except Exception as e:
@@ -181,7 +166,8 @@ def convert_command_type_to_string(type_value):
         4: "BLOCK_IP",
         5: "BLOCK_URL",
         6: "NETWORK_ISOLATE",
-        7: "NETWORK_RESTORE"
+        7: "NETWORK_RESTORE",
+        8: "UPDATE_IOCS"
     }
     return command_types.get(type_value, "UNKNOWN")
 
@@ -194,6 +180,7 @@ def convert_command_type_from_string(type_string):
         "BLOCK_IP": 4,
         "BLOCK_URL": 5,
         "NETWORK_ISOLATE": 6,
-        "NETWORK_RESTORE": 7
+        "NETWORK_RESTORE": 7,
+        "UPDATE_IOCS": 8
     }
     return command_types.get(type_string, 0) 

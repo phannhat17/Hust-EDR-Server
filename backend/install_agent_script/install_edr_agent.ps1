@@ -12,7 +12,7 @@ if ($gRPCHost -notlike "*:*") {
 }
 
 # Set download URL and installation paths
-$edrAgentUrl = "https://github.com/phannhat17/Hust-EDR-Server/releases/download/dev-v1.1.3/edr-agent.exe"
+$edrAgentUrl = "https://github.com/phannhat17/Hust-EDR-Server/releases/download/dev-fix-iocs/edr-agent.exe"
 $edrDir = "C:\Program Files\Hust-EDR-Agent"
 $edrExe = "$edrDir\edr-agent.exe"
 $serviceName = "HustEDRAgent"
@@ -126,6 +126,8 @@ server_address: $gRPCHost
 agent_id: ""
 log_file: "$logFileEscaped"
 data_dir: "$dataFileEscaped"
+scan_interval: 5
+metrics_interval: 2
 version: "1.0.1"
 "@ | Set-Content -Path $configFilePath
     Write-Host "Created initial config file at $configFilePath" -ForegroundColor Green
@@ -172,6 +174,8 @@ server_address: $gRPCHost
 agent_id: "$agentIdFromTest"
 log_file: "$logFileEscaped"
 data_dir: "$dataFileEscaped"
+scan_interval: 5
+metrics_interval: 2
 version: "1.0.1"
 "@ | Set-Content -Path $configFilePath
         Write-Host "Updated config file with agent ID" -ForegroundColor Green
@@ -238,6 +242,8 @@ server_address: $gRPCHost
 agent_id: ""
 log_file: "$logFileEscaped"
 data_dir: "$dataFileEscaped"
+scan_interval: 5
+metrics_interval: 2
 version: "1.0.1"
 "@ | Set-Content -Path $configFilePath
         Write-Host "Created config file for service at $configFilePath" -ForegroundColor Green

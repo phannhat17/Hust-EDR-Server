@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Agent, isAgentOnline } from '@/types/agent';
+import { Agent, isAgentOnline, formatAgentMetric } from '@/types/agent';
 import { apiClient } from '@/lib/api/client';
 import { Badge } from '@/components/ui/badge';
 
@@ -58,9 +58,9 @@ export function AgentSelector({ onAgentChange, selectedAgentId }: AgentSelectorP
                 <div className="flex items-center space-x-2 text-xs text-muted-foreground">
                   <span>{agent.ip_address}</span>
                   <span>•</span>
-                  <span>CPU: {agent.cpu_usage.toFixed(1)}%</span>
+                  <span>CPU: {formatAgentMetric(agent.cpu_usage).toFixed(1)}%</span>
                   <span>•</span>
-                  <span>Memory: {agent.memory_usage.toFixed(1)}%</span>
+                  <span>Memory: {formatAgentMetric(agent.memory_usage).toFixed(1)}%</span>
                 </div>
               </div>
             </SelectItem>
