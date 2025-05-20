@@ -417,16 +417,26 @@ func (h *CommandHandler) handleBlockIP(params map[string]string) (string, error)
 		return "", fmt.Errorf("missing required parameter 'ip'")
 	}
 
-	// Use Windows Firewall
-	cmdStr := fmt.Sprintf("netsh advfirewall firewall add rule name=\"EDR Block %s\" dir=in action=block remoteip=%s", ip, ip)
-	cmd := exec.Command("cmd", "/C", cmdStr)
-
-	output, err := cmd.CombinedOutput()
+	// Block outbound traffic
+	outCmdStr := fmt.Sprintf("netsh advfirewall firewall add rule name=\"EDR Block %s Out\" dir=out action=block remoteip=%s", ip, ip)
+	outCmd := exec.Command("cmd", "/C", outCmdStr)
+	outOutput, err := outCmd.CombinedOutput()
 	if err != nil {
-		return "", fmt.Errorf("failed to block IP: %v, output: %s", err, string(output))
+		return "", fmt.Errorf("failed to block outbound IP: %v, output: %s", err, string(outOutput))
 	}
 
-	return fmt.Sprintf("IP %s blocked successfully", ip), nil
+	// Block inbound traffic
+	inCmdStr := fmt.Sprintf("netsh advfirewall firewall add rule name=\"EDR Block %s In\" dir=in action=block remoteip=%s", ip, ip)
+	inCmd := exec.Command("cmd", "/C", inCmdStr)
+	inOutput, err := inCmd.CombinedOutput()
+	if err != nil {
+		// Try to clean up the outbound rule if inbound fails
+		cleanupCmd := exec.Command("cmd", "/C", fmt.Sprintf("netsh advfirewall firewall delete rule name=\"EDR Block %s Out\"", ip))
+		cleanupCmd.Run()
+		return "", fmt.Errorf("failed to block inbound IP: %v, output: %s", err, string(inOutput))
+	}
+
+	return fmt.Sprintf("IP %s blocked successfully (inbound and outbound)", ip), nil
 }
 
 // handleBlockURL blocks a URL
