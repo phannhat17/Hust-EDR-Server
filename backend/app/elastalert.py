@@ -102,7 +102,7 @@ class ElastAlertClient:
             
             alerts = []
             for hit in response['hits']['hits']:
-                # Just return the document with minimal processing
+                match_body = hit['_source'].get('match_body', {})
                 alert = {
                     'id': hit['_id'],
                     'timestamp': hit['_source'].get('@timestamp', ''),
@@ -110,7 +110,14 @@ class ElastAlertClient:
                     'raw_data': hit['_source'],
                     'status': hit['_source'].get('edr_status', 'new'),
                     'analysis_notes': hit['_source'].get('edr_notes', ''),
-                    'analyzed_by': hit['_source'].get('edr_assigned_to', '')
+                    'analyzed_by': hit['_source'].get('edr_assigned_to', ''),
+                    'edr_id': match_body.get('edr_id', ''),
+                    'host_hostname': match_body.get('host', {}).get('hostname', ''),
+                    'user_name': match_body.get('user', {}).get('name', ''),
+                    'process_command_line': match_body.get('process', {}).get('command_line', ''),
+                    'process_pid': match_body.get('process', {}).get('pid', ''),
+                    'process_parent_pid': match_body.get('process', {}).get('parent', {}).get('pid', ''),
+                    'event_created': match_body.get('event', {}).get('created', ''),
                 }
                 
                 alerts.append(alert)

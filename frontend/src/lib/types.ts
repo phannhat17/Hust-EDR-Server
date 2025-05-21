@@ -12,6 +12,13 @@ export interface Alert {
   severity?: 'low' | 'medium' | 'high';
   raw_data?: any;
   alert_time?: string;
+  edr_id?: string;
+  host_hostname?: string;
+  user_name?: string;
+  process_command_line?: string;
+  process_pid?: string;
+  process_parent_pid?: string;
+  event_created?: string;
 }
 
 export interface Rule {

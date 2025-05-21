@@ -379,6 +379,48 @@ function AlertsPage() {
                       <h3 className="text-sm font-medium text-muted-foreground mb-1">Alert ID</h3>
                       <p className="text-xs">{selectedAlert.id}</p>
                     </div>
+                    {selectedAlert.edr_id && (
+                      <div>
+                        <h3 className="text-sm font-medium text-muted-foreground mb-1">EDR ID</h3>
+                        <p className="text-xs">{selectedAlert.edr_id}</p>
+                      </div>
+                    )}
+                    {selectedAlert.host_hostname && (
+                      <div>
+                        <h3 className="text-sm font-medium text-muted-foreground mb-1">Host Name</h3>
+                        <p className="text-xs">{selectedAlert.host_hostname}</p>
+                      </div>
+                    )}
+                    {selectedAlert.user_name && (
+                      <div>
+                        <h3 className="text-sm font-medium text-muted-foreground mb-1">User Name</h3>
+                        <p className="text-xs">{selectedAlert.user_name}</p>
+                      </div>
+                    )}
+                    {selectedAlert.process_command_line && (
+                      <div>
+                        <h3 className="text-sm font-medium text-muted-foreground mb-1">Process Command Line</h3>
+                        <p className="text-xs">{selectedAlert.process_command_line}</p>
+                      </div>
+                    )}
+                    {selectedAlert.process_pid && (
+                      <div>
+                        <h3 className="text-sm font-medium text-muted-foreground mb-1">Process PID</h3>
+                        <p className="text-xs">{selectedAlert.process_pid}</p>
+                      </div>
+                    )}
+                    {selectedAlert.process_parent_pid && (
+                      <div>
+                        <h3 className="text-sm font-medium text-muted-foreground mb-1">Parent Process PID</h3>
+                        <p className="text-xs">{selectedAlert.process_parent_pid}</p>
+                      </div>
+                    )}
+                    {selectedAlert.event_created && (
+                      <div>
+                        <h3 className="text-sm font-medium text-muted-foreground mb-1">Event Created</h3>
+                        <p className="text-xs">{selectedAlert.event_created}</p>
+                      </div>
+                    )}
                     <div className="col-span-2">
                       <h3 className="text-sm font-medium text-muted-foreground mb-1">Description</h3>
                       <p>{selectedAlert.description || "No description available"}</p>
