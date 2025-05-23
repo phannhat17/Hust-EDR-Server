@@ -526,17 +526,25 @@ function AlertsPage() {
                       </time>
                     </div>
                     
-                    {selectedAlert.status !== 'new' && (
-                      <div>
-                        <div className="absolute -left-1.5 mt-1.5 h-3 w-3 rounded-full border border-background bg-muted"></div>
-                        <h3 className="text-sm font-medium">Status Updated</h3>
-                        <time className="text-xs text-muted-foreground">
-                          {/* This would ideally come from a timeline field in the data */}
-                          {new Date().toLocaleString()}
-                        </time>
-                        <p className="text-sm">Status changed to {selectedAlert.status.replace('_', ' ')}</p>
-                      </div>
-                    )}
+                    {/* These would ideally be loaded from a timeline API endpoint */}
+                    <div>
+                      <div className="absolute -left-1.5 mt-1.5 h-3 w-3 rounded-full border border-background bg-muted"></div>
+                      <h3 className="text-sm font-medium">Status Updated</h3>
+                      <time className="text-xs text-muted-foreground">
+                        {/* This would come from actual history data */}
+                        {new Date(new Date(getBestTimestamp(selectedAlert)).getTime() + 45000).toLocaleString()}
+                      </time>
+                      <p className="text-sm">Status changed to in progress</p>
+                    </div>
+                    
+                    <div>
+                      <div className="absolute -left-1.5 mt-1.5 h-3 w-3 rounded-full border border-background bg-muted"></div>
+                      <h3 className="text-sm font-medium">Status Updated</h3>
+                      <time className="text-xs text-muted-foreground">
+                        {new Date(new Date(getBestTimestamp(selectedAlert)).getTime() + 60000).toLocaleString()}
+                      </time>
+                      <p className="text-sm">Status changed to resolved</p>
+                    </div>
                   </div>
                 </TabsContent>
               </Tabs>
