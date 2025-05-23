@@ -38,6 +38,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Copy } from 'lucide-react'
+import { ExternalLink } from 'lucide-react'
 
 export const Route = createFileRoute('/_authenticated/alerts')({
   component: AlertsPage
@@ -471,6 +472,18 @@ function AlertsPage() {
                         <SelectItem value="false_positive">False Positive</SelectItem>
                       </SelectContent>
                     </Select>
+
+                    {selectedAlert.edr_id && (
+                      <Button 
+                        variant="outline"
+                        onClick={() => {
+                          window.open(`${window.location.origin}/commands?agent_id=${selectedAlert.edr_id}`, '_blank')
+                        }}
+                      >
+                        <ExternalLink className="h-4 w-4" />
+                        Send Command
+                      </Button>
+                    )}
                   </div>
                 </TabsContent>
                 
