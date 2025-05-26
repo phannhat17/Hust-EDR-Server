@@ -6,13 +6,11 @@ import (
 	"crypto/sha1"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"encoding/xml"
 	"fmt"
 	"io"
 	"log"
 	"net"
-	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -20,6 +18,8 @@ import (
 	"time"
 
 	pb "agent/proto"
+	"agent/config"
+	"agent/blocker"
 )
 
 // Scanner scans the system for IOCs
@@ -29,118 +29,35 @@ type Scanner struct {
 	intervalMinutes int
 	ctx             context.Context
 	cancel          context.CancelFunc
-	networkBlocker  *NetworkBlocker
-	sysmonLogPath   string
+	blocker         *blocker.Blocker
+	config          *config.Config
 	triggerScan     chan struct{}
 	lastScanTime    time.Time // Track when the last scan was performed
 }
 
-// NetworkBlocker handles blocking of malicious IPs and URLs
-type NetworkBlocker struct {
-	blockedIPs  map[string]bool
-	blockedURLs map[string]bool
-	storagePath string
-}
 
-// NewNetworkBlocker creates a new network blocker
-func NewNetworkBlocker(storagePath string) *NetworkBlocker {
-	nb := &NetworkBlocker{
-		blockedIPs:  make(map[string]bool),
-		blockedURLs: make(map[string]bool),
-		storagePath: storagePath,
-	}
-	
-	// Load previously blocked items
-	nb.LoadBlockedItems()
-	
-	return nb
-}
 
-// LoadBlockedItems loads the list of previously blocked IPs and URLs
-func (nb *NetworkBlocker) LoadBlockedItems() {
-	filePath := filepath.Join(nb.storagePath, "blocked_items.json")
-	if _, err := os.Stat(filePath); os.IsNotExist(err) {
-		log.Printf("No existing blocked items file found at %s", filePath)
-		return
-	}
-
-	data, err := os.ReadFile(filePath)
-	if err != nil {
-		log.Printf("Failed to read blocked items file: %v", err)
-		return
-	}
-
-	var savedData struct {
-		BlockedIPs  map[string]bool `json:"blocked_ips"`
-		BlockedURLs map[string]bool `json:"blocked_urls"`
-	}
-
-	if err := json.Unmarshal(data, &savedData); err != nil {
-		log.Printf("Failed to unmarshal blocked items data: %v", err)
-		return
-	}
-
-	nb.blockedIPs = savedData.BlockedIPs
-	nb.blockedURLs = savedData.BlockedURLs
-
-	log.Printf("Loaded blocked items: %d IPs, %d URLs", 
-		len(nb.blockedIPs), len(nb.blockedURLs))
-}
-
-// SaveBlockedItems saves the list of blocked IPs and URLs
-func (nb *NetworkBlocker) SaveBlockedItems() {
-	filePath := filepath.Join(nb.storagePath, "blocked_items.json")
-	
-	data := struct {
-		BlockedIPs  map[string]bool `json:"blocked_ips"`
-		BlockedURLs map[string]bool `json:"blocked_urls"`
-	}{
-		BlockedIPs:  nb.blockedIPs,
-		BlockedURLs: nb.blockedURLs,
-	}
-	
-	jsonData, err := json.MarshalIndent(data, "", "  ")
-	if err != nil {
-		log.Printf("Failed to marshal blocked items data: %v", err)
-		return
-	}
-
-	if err := os.WriteFile(filePath, jsonData, 0644); err != nil {
-		log.Printf("Failed to write blocked items file: %v", err)
-		return
-	}
-
-	log.Printf("Saved blocked items: %d IPs, %d URLs", 
-		len(nb.blockedIPs), len(nb.blockedURLs))
-}
-
-// MarkIPBlocked marks an IP as blocked and persists this information
-func (nb *NetworkBlocker) MarkIPBlocked(ip string) {
-	nb.blockedIPs[ip] = true
-	nb.SaveBlockedItems()
-}
-
-// MarkURLBlocked marks a URL as blocked and persists this information
-func (nb *NetworkBlocker) MarkURLBlocked(url string) {
-	nb.blockedURLs[url] = true
-	nb.SaveBlockedItems()
-}
-
-// NewScanner creates a new IOC scanner
+// NewScanner creates a new IOC scanner (legacy function)
 func NewScanner(manager *Manager, reportCallback func(context.Context, pb.IOCType, string, string, string, string) error, intervalMinutes int) *Scanner {
-	ctx, cancel := context.WithCancel(context.Background())
+	// Create a default config for legacy compatibility
+	cfg := config.NewDefaultConfig()
+	cfg.ScanInterval = intervalMinutes
 	
-	// Windows sysmon log path
-	sysmonLogPath := "C:\\Windows\\System32\\winevt\\Logs\\Microsoft-Windows-Sysmon%4Operational.evtx"
+	return NewScannerWithConfig(manager, reportCallback, cfg)
+}
+
+// NewScannerWithConfig creates a new IOC scanner with configuration
+func NewScannerWithConfig(manager *Manager, reportCallback func(context.Context, pb.IOCType, string, string, string, string) error, cfg *config.Config) *Scanner {
+	ctx, cancel := context.WithCancel(context.Background())
 	
 	return &Scanner{
 		manager:         manager,
 		reportCallback:  reportCallback,
-		intervalMinutes: intervalMinutes,
+		intervalMinutes: cfg.ScanInterval,
 		ctx:             ctx,
 		cancel:          cancel,
-		networkBlocker:  NewNetworkBlocker(manager.StoragePath),
-		sysmonLogPath:   sysmonLogPath,
+		blocker:         blocker.NewBlocker(cfg, manager.StoragePath),
+		config:          cfg,
 		triggerScan:     make(chan struct{}, 1),
 		lastScanTime:    time.Now(), // Start with current time since we skip first scan
 	}
@@ -218,7 +135,7 @@ func (s *Scanner) initializeIPBlocking() {
 	
 	s.manager.mu.RLock()
 	for ip := range s.manager.IPAddresses {
-		if !s.networkBlocker.blockedIPs[ip] {
+		if !s.blocker.IsIPBlocked(ip) {
 			s.blockIP(ip)
 			newBlocks++
 		} else {
@@ -227,8 +144,9 @@ func (s *Scanner) initializeIPBlocking() {
 	}
 	s.manager.mu.RUnlock()
 	
+	ipCount, _ := s.blocker.GetBlockedCount()
 	log.Printf("IP blocking initialized: %d new blocks, %d total blocked IPs", 
-		newBlocks, len(s.networkBlocker.blockedIPs))
+		newBlocks, ipCount)
 }
 
 // initializeURLBlocking initializes blocking of all malicious URLs immediately on startup
@@ -240,7 +158,7 @@ func (s *Scanner) initializeURLBlocking() {
 	
 	s.manager.mu.RLock()
 	for url := range s.manager.URLs {
-		if !s.networkBlocker.blockedURLs[url] {
+		if !s.blocker.IsURLBlocked(url) {
 			s.blockURL(url)
 			newBlocks++
 		} else {
@@ -249,46 +167,19 @@ func (s *Scanner) initializeURLBlocking() {
 	}
 	s.manager.mu.RUnlock()
 	
+	_, urlCount := s.blocker.GetBlockedCount()
 	log.Printf("URL blocking initialized: %d new blocks, %d total blocked URLs", 
-		newBlocks, len(s.networkBlocker.blockedURLs))
+		newBlocks, urlCount)
 }
 
 // blockIP blocks an IP immediately using Windows Firewall
 func (s *Scanner) blockIP(ip string) {
-	// Check if already blocked
-	if s.networkBlocker.blockedIPs[ip] {
-		return
-	}
-	
-	var err error
-	var message string
-	
-	// Windows firewall - outbound rule
-	cmd := exec.Command("netsh", "advfirewall", "firewall", "add", "rule",
-		"name=BlockEDR_"+ip,
-		"dir=out",
-		"action=block",
-		"remoteip="+ip)
-	_, err = cmd.Output()
-	
-	// Add inbound rule too
-	if err == nil {
-		cmd = exec.Command("netsh", "advfirewall", "firewall", "add", "rule",
-			"name=BlockEDR_In_"+ip,
-			"dir=in",
-			"action=block",
-			"remoteip="+ip)
-		_, err = cmd.Output()
-	}
+	// Use the centralized blocker
+	err := s.blocker.BlockIP(ip)
 	
 	if err != nil {
-		message = fmt.Sprintf("Failed to block IP %s: %v", ip, err)
-		log.Printf(message)
+		log.Printf("Failed to block IP %s: %v", ip, err)
 	} else {
-		message = fmt.Sprintf("Successfully blocked IP %s", ip)
-		log.Printf(message)
-		s.networkBlocker.MarkIPBlocked(ip)
-		
 		// Report the action
 		if s.reportCallback != nil {
 			ioc, exists := s.manager.IPAddresses[ip]
@@ -306,32 +197,14 @@ func (s *Scanner) blockIP(ip string) {
 	}
 }
 
-// blockURL blocks a URL by adding it to the hosts file pointing to 127.0.0.1
+// blockURL blocks a URL by adding it to the hosts file
 func (s *Scanner) blockURL(url string) {
-	// Check if already blocked
-	if s.networkBlocker.blockedURLs[url] {
-		return
-	}
-	
-	// Extract domain from URL
-	domain := extractDomain(url)
-	if domain == "" {
-		log.Printf("Failed to extract domain from URL: %s", url)
-		return
-	}
-	
-	// Windows hosts file path
-	hostsPath := "C:\\Windows\\System32\\drivers\\etc\\hosts"
-	
-	// Try to block by modifying hosts file
-	blocked, err := addDomainToHostsFile(hostsPath, domain)
+	// Use the centralized blocker
+	err := s.blocker.BlockURL(url)
 	
 	if err != nil {
 		log.Printf("Failed to block URL %s: %v", url, err)
-	} else if blocked {
-		log.Printf("Successfully blocked URL %s by adding domain %s to hosts file", url, domain)
-		s.networkBlocker.MarkURLBlocked(url)
-		
+	} else {
 		// Report the action
 		if s.reportCallback != nil {
 			ioc, exists := s.manager.URLs[url]
@@ -341,76 +214,12 @@ func (s *Scanner) blockURL(url string) {
 					pb.IOCType_IOC_URL,
 					url,
 					url,
-					fmt.Sprintf("URL blocked by adding domain %s to hosts file", domain),
+					"URL blocked by adding domain to hosts file",
 					ioc.Severity,
 				)
 			}
 		}
-	} else {
-		log.Printf("Domain %s already exists in hosts file", domain)
-		s.networkBlocker.MarkURLBlocked(url)
 	}
-}
-
-// extractDomain extracts the domain from a URL
-func extractDomain(urlStr string) string {
-	// Add http:// prefix if not present (needed for url.Parse)
-	if !strings.HasPrefix(urlStr, "http://") && !strings.HasPrefix(urlStr, "https://") {
-		urlStr = "http://" + urlStr
-	}
-	
-	// Parse the URL
-	parsedURL, err := url.Parse(urlStr)
-	if err != nil {
-		log.Printf("Failed to parse URL %s: %v", urlStr, err)
-		return ""
-	}
-	
-	// Return just the host part (domain)
-	return parsedURL.Host
-}
-
-// addDomainToHostsFile adds a domain to the hosts file, pointing to 127.0.0.1
-// Returns true if domain was added, false if it was already there
-func addDomainToHostsFile(hostsPath string, domain string) (bool, error) {
-	// Read current hosts file
-	content, err := os.ReadFile(hostsPath)
-	if err != nil {
-		return false, fmt.Errorf("failed to read hosts file: %v", err)
-	}
-	
-	// Check if domain is already in hosts file
-	lines := strings.Split(string(content), "\n")
-	blockLine := fmt.Sprintf("127.0.0.1 %s", domain)
-	
-	for _, line := range lines {
-		trimmedLine := strings.TrimSpace(line)
-		if trimmedLine == blockLine || strings.HasSuffix(trimmedLine, " "+domain) {
-			// Domain already blocked
-			return false, nil
-		}
-	}
-	
-	// Add domain to hosts file
-	file, err := os.OpenFile(hostsPath, os.O_APPEND|os.O_WRONLY, 0644)
-	if err != nil {
-		return false, fmt.Errorf("failed to open hosts file for writing: %v", err)
-	}
-	defer file.Close()
-	
-	// Add newline if file doesn't end with one
-	if !strings.HasSuffix(string(content), "\n") {
-		if _, err := file.WriteString("\n"); err != nil {
-			return false, fmt.Errorf("failed to write newline to hosts file: %v", err)
-		}
-	}
-	
-	// Add block entry
-	if _, err := file.WriteString(blockLine + "\n"); err != nil {
-		return false, fmt.Errorf("failed to write to hosts file: %v", err)
-	}
-	
-	return true, nil
 }
 
 // checkAndBlockNewURLs checks for any new URLs in the IOC database that need blocking
@@ -420,7 +229,7 @@ func (s *Scanner) checkAndBlockNewURLs() {
 	s.manager.mu.RLock()
 	for url, ioc := range s.manager.URLs {
 		// If not already blocked, block it now
-		if !s.networkBlocker.blockedURLs[url] {
+		if !s.blocker.IsURLBlocked(url) {
 			log.Printf("Found new malicious URL to block: %s (severity: %s)", url, ioc.Severity)
 			s.blockURL(url)
 		}
@@ -458,7 +267,7 @@ func (s *Scanner) checkAndBlockNewIPs() {
 	s.manager.mu.RLock()
 	for ip, ioc := range s.manager.IPAddresses {
 		// If not already blocked, block it now
-		if !s.networkBlocker.blockedIPs[ip] {
+		if !s.blocker.IsIPBlocked(ip) {
 			log.Printf("Found new malicious IP to block: %s (severity: %s)", ip, ioc.Severity)
 			s.blockIP(ip)
 		}

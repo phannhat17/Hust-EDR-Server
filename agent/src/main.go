@@ -6,105 +6,110 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
 	"agent/client"
 	"agent/config"
 	"agent/ioc"
+	"agent/logging"
 )
 
-// Define version constant
-const AGENT_VERSION = "fix-iocs"
-
-// Command-line arguments
+// Command-line flags
 var (
-	serverAddr  = flag.String("server", "localhost:50051", "Server address")
-	configFile  = flag.String("config", "config.yaml", "Configuration file")
-	logFile     = flag.String("log", "", "Log file (default: stdout)")
-	agentID     = flag.String("id", "", "Agent ID (generated if empty)")
-	dataDir     = flag.String("data", "data", "Data directory")
-	scanMinutes = flag.Int("scan-interval", 0, "IOC scan interval in minutes")
-	useTLS      = flag.Bool("tls", true, "Use TLS for server connection")
+	serverAddr      = flag.String("server", "", "Server address (overrides config)")
+	configFile      = flag.String("config", config.DefaultConfigFile, "Configuration file")
+	logFile         = flag.String("log", "", "Log file (default: stdout)")
+	agentID         = flag.String("id", "", "Agent ID (generated if empty)")
+	dataDir         = flag.String("data", "", "Data directory (overrides config)")
+	scanMinutes     = flag.Int("scan-interval", 0, "IOC scan interval in minutes (overrides config)")
+	metricsMinutes  = flag.Int("metrics-interval", 0, "Metrics update interval in minutes (overrides config)")
+	useTLS          = flag.Bool("tls", false, "Use TLS for server connection (overrides config)")
+	connectionTimeout = flag.Int("timeout", 0, "Connection timeout in seconds (overrides config)")
 )
+
+// Track if TLS flag was explicitly set
+var tlsFlagSet bool
 
 func main() {
+	// Check if TLS flag was explicitly set before parsing
+	for _, arg := range os.Args[1:] {
+		if arg == "-tls" || arg == "--tls" || arg == "-tls=true" || arg == "--tls=true" || arg == "-tls=false" || arg == "--tls=false" {
+			tlsFlagSet = true
+			break
+		}
+	}
+
 	// Parse command-line flags
 	flag.Parse()
 
+	// Load configuration with precedence: flags > YAML > defaults
+	cfg, err := config.LoadConfig(*configFile)
+	if err != nil {
+		log.Fatalf("Failed to load configuration: %v", err)
+	}
+	
+	// Ensure agent version is set
+	if cfg.AgentVersion == "" {
+		cfg.AgentVersion = config.DefaultAgentVersion
+	}
+
+	// Apply command-line flag overrides with highest precedence
+	flagOverrides := make(map[string]interface{})
+	
+	// Only override if flag was explicitly set (not default value)
+	if *serverAddr != "" {
+		flagOverrides["server"] = *serverAddr
+	}
+	if *agentID != "" {
+		flagOverrides["agent_id"] = *agentID
+	}
+	if *logFile != "" {
+		flagOverrides["log_file"] = *logFile
+	}
+	if *dataDir != "" {
+		flagOverrides["data_dir"] = *dataDir
+	}
+	if *scanMinutes > 0 {
+		flagOverrides["scan_interval"] = *scanMinutes
+	}
+	if *metricsMinutes > 0 {
+		flagOverrides["metrics_interval"] = *metricsMinutes
+	}
+	if tlsFlagSet {
+		flagOverrides["use_tls"] = *useTLS
+	}
+	if *connectionTimeout > 0 {
+		flagOverrides["connection_timeout"] = *connectionTimeout
+	}
+
+	// Apply flag overrides
+	if err := cfg.ApplyFlags(flagOverrides); err != nil {
+		log.Fatalf("Failed to apply configuration flags: %v", err)
+	}
+
 	// Setup data directory
-	if err := os.MkdirAll(*dataDir, 0755); err != nil {
+	if err := os.MkdirAll(cfg.DataDir, 0755); err != nil {
 		log.Fatalf("Failed to create data directory: %v", err)
 	}
 
-	// Setup logging
-	if *logFile != "" {
-		f, err := os.OpenFile(*logFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-		if err != nil {
-			log.Fatalf("Failed to open log file: %v", err)
-		}
-		defer f.Close()
-		log.SetOutput(f)
+	// Initialize structured logging
+	if err := logging.InitLogger(cfg); err != nil {
+		log.Fatalf("Failed to initialize logger: %v", err)
 	}
 
-	// Load configuration file
-	cfg, err := config.LoadConfig(*configFile)
-	if err != nil {
-		if !os.IsNotExist(err) {
-			log.Printf("Error loading config file: %v", err)
-		}
-		// Use default config or command-line values if file not found
-		cfg = &config.Config{
-			ServerAddress: *serverAddr,
-			AgentID:       *agentID,
-			LogFile:       *logFile,
-			DataDir:       *dataDir,
-			Version:       AGENT_VERSION,
-			UseTLS:        *useTLS,
-		}
-		log.Printf("Using default configuration")
-	} else {
-		log.Printf("Loaded configuration from %s", *configFile)
-		
-		// Override config with command-line flags if provided
-		if *serverAddr != "localhost:50051" {
-			cfg.ServerAddress = *serverAddr
-		}
-		if *agentID != "" {
-			cfg.AgentID = *agentID
-		}
-		if *logFile != "" {
-			cfg.LogFile = *logFile
-		}
-		if *dataDir != "data" {
-			cfg.DataDir = *dataDir
-		}
-		
-		// Simple approach: command line flag takes precedence over config file
-		cfg.UseTLS = *useTLS
-		
-		// Always update the version in config to current version
-		if cfg.Version != AGENT_VERSION {
-			cfg.Version = AGENT_VERSION
-			log.Printf("Updating agent version in config to %s", AGENT_VERSION)
-			if err := config.SaveConfig(*configFile, cfg); err != nil {
-				log.Printf("Failed to save updated version: %v", err)
-			}
-		}
-	}
+	logging.Info().
+		Str("version", cfg.AgentVersion).
+		Str("server", cfg.ServerAddress).
+		Str("data_dir", cfg.DataDir).
+		Msg("Starting EDR Agent")
 
 	// Create and start the EDR client
-	edrClient, err := client.NewEDRClientWithTLS(cfg.ServerAddress, cfg.AgentID, cfg.DataDir, cfg.UseTLS)
+	edrClient, err := client.NewEDRClientWithConfig(cfg)
 	if err != nil {
 		log.Fatalf("Failed to create EDR client: %v", err)
 	}
-	
-	// Set the agent version
-	edrClient.SetAgentVersion(cfg.Version)
-	
-	// Set metrics interval
-	edrClient.SetMetricsInterval(cfg.MetricsInterval)
-	log.Printf("Setting metrics interval to %d minutes from config", cfg.MetricsInterval)
 
 	// Start agent connection
 	ctx, cancel := context.WithCancel(context.Background())
@@ -117,72 +122,96 @@ func main() {
 	}
 
 	log.Printf("Registered with server as agent ID: %s", agentInfo.AgentID)
-	// If agent ID was newly assigned, save to config
+	
+	// If agent ID was newly assigned, update config and save
 	if cfg.AgentID == "" || cfg.AgentID != agentInfo.AgentID {
 		cfg.AgentID = agentInfo.AgentID
-		if err := config.SaveConfig(*configFile, cfg); err != nil {
+		if err := cfg.SaveConfig(*configFile); err != nil {
 			log.Printf("Failed to save updated config: %v", err)
 		} else {
 			log.Printf("Updated configuration with assigned agent ID")
 		}
 	}
-	
+
 	// Get command handler for IOC Scanner configuration
 	commandHandler := edrClient.GetCommandHandler()
-	
+
+	// Use WaitGroup for graceful shutdown
+	var wg sync.WaitGroup
+
 	// Start bidirectional command stream - IOC updates will come through this channel
-	log.Printf("Starting bidirectional gRPC streaming - IOC updates will be received through this channel")
-	go edrClient.StartCommandStream(ctx)
-	
-	// Request IOC updates on startup
-	go requestIOCUpdatesOnStartup(ctx, edrClient)
-	
-	// Use config scan interval if command-line flag wasn't explicitly set
-	intervalMinutes := *scanMinutes
-	if flag.Lookup("scan-interval").DefValue == flag.Lookup("scan-interval").Value.String() {
-		intervalMinutes = cfg.ScanInterval
-		log.Printf("Using scan interval from config: %d minutes", intervalMinutes)
-	}
-	
+	logging.Info().Msg("Starting bidirectional gRPC streaming - IOC updates will be received through this channel")
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		edrClient.StartCommandStream(ctx)
+	}()
+
+	// Request IOC updates on startup with configured delay
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		requestIOCUpdatesOnStartup(ctx, edrClient, cfg.GetIOCUpdateDelayDuration())
+	}()
+
 	// Configure and start IOC scanner
-	scanner := ioc.NewScanner(
+	scanner := ioc.NewScannerWithConfig(
 		commandHandler.GetIOCManager(),
 		commandHandler.ReportIOCMatch,
-		intervalMinutes,
+		cfg,
 	)
-	
+
 	// Set scanner in command handler
 	commandHandler.SetScanner(scanner)
-	
+
 	// Start IOC scanning
 	scanner.Start()
-	
-	log.Printf("EDR agent started (ID: %s, Server: %s)", agentInfo.AgentID, cfg.ServerAddress)
-	log.Printf("IOC scanner started with %d minute interval", intervalMinutes)
+
+	logging.Info().
+		Str("agent_id", agentInfo.AgentID).
+		Str("server", cfg.ServerAddress).
+		Int("scan_interval", cfg.ScanInterval).
+		Int("metrics_interval", cfg.MetricsInterval).
+		Msg("EDR agent started successfully")
 
 	// Handle graceful shutdown
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 	<-sigChan
 
-	log.Printf("Shutting down agent...")
-	
+	logging.Info().Msg("Shutting down agent...")
+
 	// Stop the IOC scanner
 	scanner.Stop()
-	
+
 	// Cancel context to stop other goroutines
 	cancel()
-	
-	// Allow time for cleanup
-	time.Sleep(500 * time.Millisecond)
-	log.Printf("Agent shutdown complete")
+
+	// Wait for all goroutines to finish
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	// Wait for graceful shutdown or timeout
+	select {
+	case <-done:
+		logging.Info().Msg("All goroutines stopped gracefully")
+	case <-time.After(cfg.GetShutdownTimeoutDuration()):
+		logging.Warn().
+			Dur("timeout", cfg.GetShutdownTimeoutDuration()).
+			Msg("Shutdown timeout reached, forcing exit")
+	}
+
+	logging.Info().Msg("Agent shutdown complete")
 }
 
 // requestIOCUpdatesOnStartup sends a request to the server for IOC updates
-func requestIOCUpdatesOnStartup(ctx context.Context, edrClient *client.EDRClient) {
-	// Give time for the command stream to establish
-	time.Sleep(3 * time.Second)
-	
-	log.Printf("Requesting IOC updates from server...")
+func requestIOCUpdatesOnStartup(ctx context.Context, edrClient *client.EDRClient, delay time.Duration) {
+	// Give time for the command stream to establish using configured delay
+	time.Sleep(delay)
+
+	logging.Info().Msg("Requesting IOC updates from server...")
 	edrClient.RequestIOCUpdates(ctx)
 } 

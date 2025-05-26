@@ -20,6 +20,8 @@ import (
 	"github.com/shirou/gopsutil/v3/host"
 
 	pb "agent/proto"
+	"agent/config"
+	"agent/logging"
 )
 
 // Initialize random number generator on package import
@@ -37,50 +39,69 @@ type EDRClient struct {
 	agentVersion    string
 	dataDir         string
 	useTLS          bool
-	metricsInterval int
+	config          *config.Config
 }
 
-// NewEDRClient creates a new EDR client
+// NewEDRClient creates a new EDR client (legacy function)
 func NewEDRClient(serverAddress, agentID string, dataDir string) (*EDRClient, error) {
 	return NewEDRClientWithTLS(serverAddress, agentID, dataDir, false)
 }
 
-// NewEDRClientWithTLS creates a new EDR client with TLS enabled
+// NewEDRClientWithTLS creates a new EDR client with TLS enabled (legacy function)
 func NewEDRClientWithTLS(serverAddress, agentID string, dataDir string, useTLS bool) (*EDRClient, error) {
+	// Create a temporary config for legacy compatibility
+	cfg := config.NewDefaultConfig()
+	cfg.ServerAddress = serverAddress
+	cfg.AgentID = agentID
+	cfg.DataDir = dataDir
+	cfg.UseTLS = useTLS
+	
+	return NewEDRClientWithConfig(cfg)
+}
+
+// NewEDRClientWithConfig creates a new EDR client using a configuration object
+func NewEDRClientWithConfig(cfg *config.Config) (*EDRClient, error) {
 	var conn *grpc.ClientConn
 	var err error
 
-	if useTLS {
+	if cfg.UseTLS {
 		// Create the credentials and skip certificate verification for self-signed certs
 		creds := credentials.NewTLS(&tls.Config{
 			InsecureSkipVerify: true, // Skip certificate verification for testing
 		})
 
-		conn, err = grpc.Dial(serverAddress, grpc.WithTransportCredentials(creds))
+		conn, err = grpc.Dial(cfg.ServerAddress, grpc.WithTransportCredentials(creds))
 		if err != nil {
 			return nil, fmt.Errorf("failed to connect to server with TLS: %v", err)
 		}
 		
-		log.Printf("Connected to server %s with TLS encryption (insecure mode)", serverAddress)
+		logging.Info().
+			Str("server", cfg.ServerAddress).
+			Bool("tls", true).
+			Msg("Connected to server with TLS encryption (insecure mode)")
 	} else {
 		// Connect without TLS (insecure)
-		conn, err = grpc.Dial(serverAddress, grpc.WithTransportCredentials(insecure.NewCredentials()))
+		conn, err = grpc.Dial(cfg.ServerAddress, grpc.WithTransportCredentials(insecure.NewCredentials()))
 		if err != nil {
 			return nil, fmt.Errorf("failed to connect to server: %v", err)
 		}
 		
-		log.Printf("Connected to server %s without encryption (not recommended)", serverAddress)
+		logging.Warn().
+			Str("server", cfg.ServerAddress).
+			Bool("tls", false).
+			Msg("Connected to server without encryption (not recommended)")
 	}
 
 	// Create client
 	client := &EDRClient{
-		serverAddress: serverAddress,
-		agentID:       agentID,
+		serverAddress: cfg.ServerAddress,
+		agentID:       cfg.AgentID,
 		conn:          conn,
 		edrClient:     pb.NewEDRServiceClient(conn),
-		agentVersion:  "1.0.0", // Default version
-		dataDir:       dataDir,
-		useTLS:        useTLS,
+		agentVersion:  cfg.AgentVersion,
+		dataDir:       cfg.DataDir,
+		useTLS:        cfg.UseTLS,
+		config:        cfg,
 	}
 
 	// Create command handler
@@ -89,19 +110,21 @@ func NewEDRClientWithTLS(serverAddress, agentID string, dataDir string, useTLS b
 	return client, nil
 }
 
-// SetAgentVersion sets the agent version
+// SetAgentVersion sets the agent version (legacy function)
 func (c *EDRClient) SetAgentVersion(version string) {
 	c.agentVersion = version
+	if c.config != nil {
+		c.config.AgentVersion = version
+	}
 }
 
-// SetMetricsInterval sets the system metrics update interval in minutes
+// SetMetricsInterval sets the system metrics update interval in minutes (legacy function)
 func (c *EDRClient) SetMetricsInterval(interval int) {
-	if interval <= 0 {
-		c.metricsInterval = 2 // Default to 2 minutes
-		log.Printf("WARNING: Invalid metrics interval %d specified, defaulting to %d minutes", interval, c.metricsInterval)
-	} else {
-		c.metricsInterval = interval
-		log.Printf("Setting metrics interval to %d minutes", interval)
+	if c.config != nil {
+		c.config.MetricsInterval = interval
+		logging.Info().
+			Int("interval_minutes", interval).
+			Msg("Setting metrics interval")
 	}
 }
 
@@ -158,6 +181,9 @@ func (c *EDRClient) Register(ctx context.Context) (*AgentInfo, error) {
 	// If server assigned a new ID, update our agent ID
 	if resp.AssignedId != "" {
 		c.agentID = resp.AssignedId
+		if c.config != nil {
+			c.config.AgentID = resp.AssignedId
+		}
 	}
 
 	// Return agent info
@@ -208,7 +234,7 @@ func (c *EDRClient) UpdateStatus(ctx context.Context, status string, metrics map
 func (c *EDRClient) StartCommandStream(ctx context.Context) {
 	// Track failed connection attempts for backoff strategy
 	consecutiveFailures := 0
-	maxBackoff := 60 * time.Second
+	maxBackoff := c.config.GetMaxReconnectDelayDuration()
 	
 	for {
 		select {
@@ -217,7 +243,8 @@ func (c *EDRClient) StartCommandStream(ctx context.Context) {
 			return
 		default:
 			// Calculate backoff time based on consecutive failures
-			backoffTime := time.Duration(math.Min(float64(5*consecutiveFailures), float64(maxBackoff.Seconds()))) * time.Second
+			baseDelay := c.config.GetReconnectDelayDuration()
+			backoffTime := time.Duration(math.Min(float64(baseDelay.Seconds()*float64(consecutiveFailures)), float64(maxBackoff.Seconds()))) * time.Second
 			
 			// Open bidirectional stream
 			stream, err := c.edrClient.CommandStream(ctx)
@@ -249,7 +276,7 @@ func (c *EDRClient) StartCommandStream(ctx context.Context) {
 			if err := stream.Send(helloMsg); err != nil {
 				log.Printf("Failed to send HELLO message: %v", err)
 				stream.CloseSend()
-				time.Sleep(5 * time.Second)
+				time.Sleep(c.config.GetReconnectDelayDuration())
 				continue
 			}
 
@@ -393,37 +420,12 @@ func (c *EDRClient) StartCommandStream(ctx context.Context) {
 								return
 							}
 							
-							// Process the IOC data
+							// Process the IOC data using the centralized method
 							log.Printf("Processing IOC update to version %d", data.Version)
 							
-							// Clear existing IOCs
-							iocManager.ClearAll()
-							
-							// Add IP addresses
-							for ip, iocData := range data.IpAddresses {
-								iocManager.AddIP(ip, iocData.Description, iocData.Severity)
-							}
-							
-							// Add file hashes
-							for hash, iocData := range data.FileHashes {
-								hashType := "sha256" // Default
-								if val, ok := iocData.Metadata["hash_type"]; ok {
-									hashType = val
-								}
-								iocManager.AddFileHash(hash, hashType, iocData.Description, iocData.Severity)
-							}
-							
-							// Add URLs
-							for url, iocData := range data.Urls {
-								iocManager.AddURL(url, iocData.Description, iocData.Severity)
-							}
-							
-							// Update version
-							iocManager.SetVersion(data.Version)
-							
-							// Save IOCs to disk
-							if err := iocManager.SaveToFile(); err != nil {
-								log.Printf("ERROR: Failed to save IOCs to disk: %v", err)
+							// Update IOCs from protobuf response
+							if err := iocManager.UpdateFromProto(data); err != nil {
+								log.Printf("ERROR: Failed to update IOCs: %v", err)
 								return
 							}
 							
@@ -447,9 +449,9 @@ func (c *EDRClient) StartCommandStream(ctx context.Context) {
 			go func() {
 				defer wg.Done()
 				
-				// Use the metrics interval from config (in minutes)
-				log.Printf("Creating status ticker with interval of %d minutes", c.metricsInterval)
-				statusTicker := time.NewTicker(time.Duration(c.metricsInterval) * time.Minute)
+				// Use the metrics interval from config
+				log.Printf("Creating status ticker with interval of %d minutes", c.config.MetricsInterval)
+				statusTicker := time.NewTicker(c.config.GetMetricsIntervalDuration())
 				defer statusTicker.Stop()
 				
 				// Send an initial status update immediately
@@ -478,8 +480,8 @@ func (c *EDRClient) StartCommandStream(ctx context.Context) {
 				return
 			default:
 				// Wait before reconnecting
-				log.Println("Will attempt to reconnect command stream in 5 seconds")
-				time.Sleep(5 * time.Second)
+				log.Printf("Will attempt to reconnect command stream in %v", c.config.GetReconnectDelayDuration())
+				time.Sleep(c.config.GetReconnectDelayDuration())
 			}
 		}
 	}
@@ -494,7 +496,7 @@ func sendStatusUpdate(c *EDRClient, stream pb.EDRService_CommandStreamClient, st
 	default:
 		// Collect system metrics
 		metrics := map[string]float64{
-			"cpu_usage":    getCPUUsage(),
+			"cpu_usage":    getCPUUsage(c.config),
 			"memory_usage": getMemoryUsage(),
 			"uptime":       float64(getUptime()),
 		}
@@ -539,9 +541,10 @@ var (
 )
 
 // Helper functions for system metrics
-func getCPUUsage() float64 {
-	// Get actual CPU usage using gopsutil
-	percentages, err := cpu.Percent(time.Second/2, false)  // 500ms sample, average across all cores
+func getCPUUsage(cfg *config.Config) float64 {
+	// Get actual CPU usage using gopsutil with configured sample duration
+	sampleDuration := cfg.GetCPUSampleDuration()
+	percentages, err := cpu.Percent(sampleDuration, false)  // Use configured sample duration, average across all cores
 	if err != nil || len(percentages) == 0 {
 		log.Printf("Warning: failed to get CPU usage: %v", err)
 		return 0.1 // Default fallback value if monitoring fails

@@ -13,13 +13,15 @@ import (
 
 	pb "agent/proto"
 	"agent/ioc"
+	"agent/blocker"
 )
 
 // CommandHandler handles incoming commands from the server
 type CommandHandler struct {
-	client *EDRClient
+	client     *EDRClient
 	iocManager *ioc.Manager
 	scanner    *ioc.Scanner
+	blocker    *blocker.Blocker
 }
 
 // NewCommandHandler creates a new command handler
@@ -32,9 +34,13 @@ func NewCommandHandler(client *EDRClient) *CommandHandler {
 		log.Printf("Warning: failed to load IOCs: %v", err)
 	}
 	
+	// Create blocker instance
+	blockerInstance := blocker.NewBlocker(client.config, client.dataDir)
+	
 	return &CommandHandler{
 		client:     client,
 		iocManager: iocManager,
+		blocker:    blockerInstance,
 	}
 }
 
@@ -42,10 +48,7 @@ func NewCommandHandler(client *EDRClient) *CommandHandler {
 func (h *CommandHandler) HandleCommand(ctx context.Context, cmd *pb.Command) *pb.CommandResult {
 	startTime := time.Now()
 	
-	// Add more detailed logging about the incoming command
-	log.Printf("DEBUG: HandleCommand received command - ID: %s, Type: %d (%s)", 
-		cmd.CommandId, cmd.Type, cmd.Type.String())
-	log.Printf("DEBUG: Command params dump: %+v", cmd.Params)
+
 	
 	result := &pb.CommandResult{
 		CommandId:     cmd.CommandId,
@@ -63,28 +66,20 @@ func (h *CommandHandler) HandleCommand(ctx context.Context, cmd *pb.Command) *pb
 	// Execute command based on type
 	switch cmd.Type {
 	case pb.CommandType_DELETE_FILE:
-		log.Printf("DEBUG: Matched DELETE_FILE type (value: %d), calling handleDeleteFile", int(pb.CommandType_DELETE_FILE))
 		message, err = h.handleDeleteFile(cmd.Params)
 	case pb.CommandType_KILL_PROCESS:
-		log.Printf("DEBUG: Matched KILL_PROCESS type (value: %d)", int(pb.CommandType_KILL_PROCESS))
 		message, err = h.handleKillProcess(cmd.Params)
 	case pb.CommandType_KILL_PROCESS_TREE:
-		log.Printf("DEBUG: Matched KILL_PROCESS_TREE type (value: %d)", int(pb.CommandType_KILL_PROCESS_TREE))
 		message, err = h.handleKillProcessTree(cmd.Params)
 	case pb.CommandType_BLOCK_IP:
-		log.Printf("DEBUG: Matched BLOCK_IP type (value: %d)", int(pb.CommandType_BLOCK_IP))
 		message, err = h.handleBlockIP(cmd.Params)
 	case pb.CommandType_BLOCK_URL:
-		log.Printf("DEBUG: Matched BLOCK_URL type (value: %d)", int(pb.CommandType_BLOCK_URL))
 		message, err = h.handleBlockURL(cmd.Params)
 	case pb.CommandType_NETWORK_ISOLATE:
-		log.Printf("DEBUG: Matched NETWORK_ISOLATE type (value: %d)", int(pb.CommandType_NETWORK_ISOLATE))
 		message, err = h.handleNetworkIsolate(cmd.Params)
 	case pb.CommandType_NETWORK_RESTORE:
-		log.Printf("DEBUG: Matched NETWORK_RESTORE type (value: %d)", int(pb.CommandType_NETWORK_RESTORE))
 		message, err = h.handleNetworkRestore(cmd.Params)
 	case pb.CommandType_UPDATE_IOCS:
-		log.Printf("DEBUG: Matched UPDATE_IOCS type (value: %d)", int(pb.CommandType_UPDATE_IOCS))
 		// Updates now come directly through the command stream
 		message = "UPDATE_IOCS command acknowledged. IOC data will be received through the command stream."
 	default:
@@ -121,14 +116,6 @@ func (h *CommandHandler) SetScanner(scanner *ioc.Scanner) {
 // GetScanner returns the IOC scanner instance
 func (h *CommandHandler) GetScanner() *ioc.Scanner {
 	return h.scanner
-}
-
-// UpdateIOCs updates the IOC database from the server
-func (h *CommandHandler) UpdateIOCs(ctx context.Context) (string, error) {
-	// With the integrated command stream approach, we don't need to make separate RPC calls
-	// IOC updates are now received directly through the CommandStream
-	log.Printf("IOC updates are now handled directly through the command stream")
-	return "IOC updates are now handled automatically through the command stream", nil
 }
 
 // ReportIOCMatch sends an IOC match report to the server
@@ -235,9 +222,6 @@ func (h *CommandHandler) handleDeleteFile(params map[string]string) (string, err
 	
 	log.Printf("Attempting to delete file at path: %s", path)
 	
-	// Print all parameters received for debugging
-	log.Printf("All parameters received: %+v", params)
-	
 	// Check if path is absolute
 	if !filepath.IsAbs(path) {
 		log.Printf("WARNING: Path is not absolute, current working directory is: %s", getCurrentDirectory())
@@ -254,26 +238,6 @@ func (h *CommandHandler) handleDeleteFile(params map[string]string) (string, err
 	fileInfo, err := os.Stat(path)
 	if os.IsNotExist(err) {
 		log.Printf("ERROR: File not found at path: %s", path)
-		
-		// Try to list parent directory to see what's available
-		parentDir := filepath.Dir(path)
-		log.Printf("DEBUG: Checking contents of parent directory: %s", parentDir)
-		
-		files, err := os.ReadDir(parentDir)
-		if err != nil {
-			log.Printf("ERROR: Could not read parent directory: %v", err)
-		} else {
-			log.Printf("DEBUG: Parent directory contents (%d entries):", len(files))
-			for i, file := range files {
-				if i < 10 { // Limit to first 10 entries to avoid log flooding
-					log.Printf("  - %s (isDir: %v)", file.Name(), file.IsDir())
-				}
-			}
-			if len(files) > 10 {
-				log.Printf("  - ... and %d more entries", len(files)-10)
-			}
-		}
-		
 		return "", fmt.Errorf("file not found: %s", path)
 	} else if err != nil {
 		log.Printf("ERROR: Failed to check file status: %v", err)
@@ -281,9 +245,6 @@ func (h *CommandHandler) handleDeleteFile(params map[string]string) (string, err
 	}
 	
 	log.Printf("File exists, size: %d bytes, isDir: %v", fileInfo.Size(), fileInfo.IsDir())
-	
-	// Check file permissions before attempting to delete
-	log.Printf("DEBUG: File mode: %s", fileInfo.Mode().String())
 	
 	// Delete the file
 	err = os.Remove(path)
@@ -417,23 +378,10 @@ func (h *CommandHandler) handleBlockIP(params map[string]string) (string, error)
 		return "", fmt.Errorf("missing required parameter 'ip'")
 	}
 
-	// Block outbound traffic
-	outCmdStr := fmt.Sprintf("netsh advfirewall firewall add rule name=\"EDR Block %s Out\" dir=out action=block remoteip=%s", ip, ip)
-	outCmd := exec.Command("cmd", "/C", outCmdStr)
-	outOutput, err := outCmd.CombinedOutput()
+	// Use the centralized blocker
+	err := h.blocker.BlockIP(ip)
 	if err != nil {
-		return "", fmt.Errorf("failed to block outbound IP: %v, output: %s", err, string(outOutput))
-	}
-
-	// Block inbound traffic
-	inCmdStr := fmt.Sprintf("netsh advfirewall firewall add rule name=\"EDR Block %s In\" dir=in action=block remoteip=%s", ip, ip)
-	inCmd := exec.Command("cmd", "/C", inCmdStr)
-	inOutput, err := inCmd.CombinedOutput()
-	if err != nil {
-		// Try to clean up the outbound rule if inbound fails
-		cleanupCmd := exec.Command("cmd", "/C", fmt.Sprintf("netsh advfirewall firewall delete rule name=\"EDR Block %s Out\"", ip))
-		cleanupCmd.Run()
-		return "", fmt.Errorf("failed to block inbound IP: %v, output: %s", err, string(inOutput))
+		return "", fmt.Errorf("failed to block IP %s: %v", ip, err)
 	}
 
 	return fmt.Sprintf("IP %s blocked successfully (inbound and outbound)", ip), nil
@@ -446,46 +394,13 @@ func (h *CommandHandler) handleBlockURL(params map[string]string) (string, error
 		return "", fmt.Errorf("missing required parameter 'url'")
 	}
 
-	// Extract domain from URL
-	domain := url
-	if strings.Contains(url, "://") {
-		parts := strings.Split(url, "://")
-		if len(parts) > 1 {
-			domain = parts[1]
-		}
-	}
-	// Remove path if any
-	if strings.Contains(domain, "/") {
-		domain = strings.Split(domain, "/")[0]
-	}
-
-	// Block at hosts file level
-	hostsFile := "C:\\Windows\\System32\\drivers\\etc\\hosts"
-
-	// Check if entry already exists
-	content, err := os.ReadFile(hostsFile)
+	// Use the centralized blocker
+	err := h.blocker.BlockURL(url)
 	if err != nil {
-		return "", fmt.Errorf("failed to read hosts file: %v", err)
+		return "", fmt.Errorf("failed to block URL %s: %v", url, err)
 	}
 
-	contentStr := string(content)
-	hostEntry := fmt.Sprintf("127.0.0.1 %s", domain)
-	if strings.Contains(contentStr, hostEntry) {
-		return fmt.Sprintf("URL %s already blocked in hosts file", url), nil
-	}
-
-	// Add entry to hosts file
-	f, err := os.OpenFile(hostsFile, os.O_APPEND|os.O_WRONLY, 0644)
-	if err != nil {
-		return "", fmt.Errorf("failed to open hosts file: %v", err)
-	}
-	defer f.Close()
-
-	if _, err = f.WriteString(fmt.Sprintf("\n%s # Added by EDR agent\n", hostEntry)); err != nil {
-		return "", fmt.Errorf("failed to update hosts file: %v", err)
-	}
-
-	return fmt.Sprintf("URL %s (domain: %s) blocked successfully", url, domain), nil
+	return fmt.Sprintf("URL %s blocked successfully", url), nil
 }
 
 // handleNetworkIsolate isolates the host from the network
@@ -571,8 +486,3 @@ func (h *CommandHandler) handleNetworkRestore(params map[string]string) (string,
 
 	return "Network connectivity restored successfully", nil
 }
-
-// isWindows returns whether the current OS is Windows
-func isWindows() bool {
-	return true // This is a Windows-only implementation
-} 

@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+
+	pb "agent/proto"
 )
 
 // IOCType represents the type of IOC
@@ -228,6 +230,88 @@ func (m *Manager) CheckURL(url string) (bool, IOC) {
 	}
 
 	return false, IOC{}
+}
+
+// UpdateFromProto updates IOCs from a protobuf IOCResponse
+func (m *Manager) UpdateFromProto(response *pb.IOCResponse) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// Clear existing IOCs
+	m.IPAddresses = make(map[string]IOC)
+	m.FileHashes = make(map[string]IOC)
+	m.URLs = make(map[string]IOC)
+
+	// Add IP addresses
+	for ip, iocData := range response.IpAddresses {
+		m.IPAddresses[ip] = IOC{
+			Value:       ip,
+			Type:        TypeIP,
+			Description: iocData.Description,
+			Severity:    iocData.Severity,
+			Metadata:    iocData.Metadata,
+		}
+	}
+
+	// Add file hashes
+	for hash, iocData := range response.FileHashes {
+		hashType := "sha256" // Default
+		if val, ok := iocData.Metadata["hash_type"]; ok {
+			hashType = val
+		}
+		
+		m.FileHashes[strings.ToLower(hash)] = IOC{
+			Value:       strings.ToLower(hash),
+			Type:        TypeFileHash,
+			Description: iocData.Description,
+			Severity:    iocData.Severity,
+			Metadata: map[string]string{
+				"hash_type": hashType,
+			},
+		}
+		
+		// Copy additional metadata
+		for k, v := range iocData.Metadata {
+			if k != "hash_type" {
+				m.FileHashes[strings.ToLower(hash)].Metadata[k] = v
+			}
+		}
+	}
+
+	// Add URLs
+	for url, iocData := range response.Urls {
+		m.URLs[strings.ToLower(url)] = IOC{
+			Value:       strings.ToLower(url),
+			Type:        TypeURL,
+			Description: iocData.Description,
+			Severity:    iocData.Severity,
+			Metadata:    iocData.Metadata,
+		}
+	}
+
+	// Update version
+	m.Version = response.Version
+
+	// Save to file
+	return m.saveToFileUnlocked()
+}
+
+// saveToFileUnlocked saves IOCs to file without acquiring lock (internal use)
+func (m *Manager) saveToFileUnlocked() error {
+	filePath := filepath.Join(m.StoragePath, "iocs.json")
+	data, err := json.MarshalIndent(m, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal IOC data: %v", err)
+	}
+
+	if err := os.WriteFile(filePath, data, 0644); err != nil {
+		return fmt.Errorf("failed to write IOC file: %v", err)
+	}
+
+	log.Printf("Saved IOCs to file: %d IPs, %d file hashes, %d URLs, version %d",
+		len(m.IPAddresses), len(m.FileHashes), len(m.URLs), m.Version)
+
+	return nil
 }
 
 // GetStats returns statistics about the IOC database
