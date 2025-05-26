@@ -33,6 +33,7 @@ type Scanner struct {
 	config          *config.Config
 	triggerScan     chan struct{}
 	lastScanTime    time.Time // Track when the last scan was performed
+	lastRecordRead  uint32    // Track last Windows Event Log record read for efficient scanning
 }
 
 
@@ -278,7 +279,12 @@ func (s *Scanner) checkAndBlockNewIPs() {
 // scanSysmonLogs scans Windows sysmon logs for file hash matches
 func (s *Scanner) scanSysmonLogs() {
 	log.Printf("Scanning Windows sysmon logs for file hash matches")
-	s.scanWindowsSysmonLogs()
+	
+	// Try efficient API-based scanning first, fallback to XML export if needed
+	if err := s.scanWindowsSysmonLogsEfficient(); err != nil {
+		log.Printf("Efficient scanning failed (%v), falling back to XML export method", err)
+		s.scanWindowsSysmonLogs()
+	}
 }
 
 // XML structures for parsing Sysmon events
