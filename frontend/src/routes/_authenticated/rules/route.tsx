@@ -14,7 +14,7 @@ import {
 } from '@/components/ui/table'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from '@/hooks/use-toast'
-import { Trash2, Edit, Play, Plus } from 'lucide-react'
+import { Trash2, Edit, Play, Plus, Square } from 'lucide-react'
 import {
   Dialog,
   DialogContent,
@@ -711,6 +711,61 @@ function RulesPage() {
     },
   })
 
+  // ElastAlert status state and mutations
+  const [elastAlertStatus, setElastAlertStatus] = useState<string>('unknown')
+  const [isElastAlertRunning, setIsElastAlertRunning] = useState<boolean>(false)
+
+  // Query for ElastAlert status
+  const { data: statusData } = useQuery({
+    queryKey: ['elastalert-status'],
+    queryFn: rulesApi.getElastAlertStatus,
+    refetchInterval: 5000, // Refresh every 5 seconds
+  })
+
+  // Update local state when status data changes
+  useEffect(() => {
+    if (statusData) {
+      setElastAlertStatus(statusData.status)
+      setIsElastAlertRunning(statusData.is_running)
+    }
+  }, [statusData])
+
+  const stopMutation = useMutation({
+    mutationFn: () => rulesApi.stopElastAlert(),
+    onSuccess: () => {
+      toast({
+        title: 'ElastAlert stopped',
+        description: 'ElastAlert has been stopped successfully.',
+      })
+      queryClient.invalidateQueries({ queryKey: ['elastalert-status'] })
+    },
+    onError: (error) => {
+      toast({
+        title: 'Error',
+        description: 'Failed to stop ElastAlert: ' + String(error),
+        variant: 'destructive'
+      })
+    }
+  })
+
+  const startMutation = useMutation({
+    mutationFn: () => rulesApi.startElastAlert(),
+    onSuccess: () => {
+      toast({
+        title: 'ElastAlert started',
+        description: 'ElastAlert has been started successfully.',
+      })
+      queryClient.invalidateQueries({ queryKey: ['elastalert-status'] })
+    },
+    onError: (error) => {
+      toast({
+        title: 'Error',
+        description: 'Failed to start ElastAlert: ' + String(error),
+        variant: 'destructive'
+      })
+    }
+  })
+
   const editMutation = useMutation({
     mutationFn: ({ filename, ruleData }: { filename: string, ruleData: any }) => 
       rulesApi.updateRule(filename, ruleData),
@@ -743,6 +798,14 @@ function RulesPage() {
 
   const handleRestart = () => {
     restartMutation.mutate()
+  }
+
+  const handleStop = () => {
+    stopMutation.mutate()
+  }
+
+  const handleStart = () => {
+    startMutation.mutate()
   }
 
   const handleYamlEditSubmit = async (data: { filename?: string, yamlContent: string }) => {
@@ -858,20 +921,38 @@ function RulesPage() {
             <Button onClick={() => setIsCreateDialogOpen(true)}>
               <Plus className="mr-2 h-4 w-4" /> Create Rule
             </Button>
-            <Button 
-              onClick={handleRestart}
-              disabled={restartMutation.isPending}
-            >
-              {restartMutation.isPending ? (
-                <>
-                  <span className="animate-spin mr-2">⟳</span> Restarting...
-                </>
-              ) : (
-                <>
-                  <Play className="mr-2 h-4 w-4" /> Restart ElastAlert
-                </>
-              )}
-            </Button>
+            {isElastAlertRunning ? (
+              <Button 
+                onClick={handleStop}
+                disabled={stopMutation.isPending}
+                variant="destructive"
+              >
+                {stopMutation.isPending ? (
+                  <>
+                    <span className="animate-spin mr-2">⟳</span> Stopping...
+                  </>
+                ) : (
+                  <>
+                    <Square className="mr-2 h-4 w-4" /> Stop ElastAlert
+                  </>
+                )}
+              </Button>
+            ) : (
+              <Button 
+                onClick={handleStart}
+                disabled={startMutation.isPending}
+              >
+                {startMutation.isPending ? (
+                  <>
+                    <span className="animate-spin mr-2">⟳</span> Starting...
+                  </>
+                ) : (
+                  <>
+                    <Play className="mr-2 h-4 w-4" /> Start ElastAlert
+                  </>
+                )}
+              </Button>
+            )}
           </div>
         </div>
         

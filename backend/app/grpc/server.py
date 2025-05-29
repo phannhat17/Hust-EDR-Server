@@ -673,23 +673,11 @@ class EDRServicer(agent_pb2_grpc.EDRServiceServicer):
                     message=f"IOC update command queued for delivery to agent {agent_id}"
                 )
             
-            # For other commands, wait for result
-            start_time = time.time()
-            timeout = 10  # seconds
-            while (time.time() - start_time) < timeout:
-                with self.results_lock:
-                    if command.command_id in self.command_results:
-                        result = self.command_results[command.command_id]
-                        return agent_pb2.SendCommandResponse(
-                            success=result.get('success', False),
-                            message=f"Command {'succeeded' if result.get('success', False) else 'failed'} in {result.get('duration_ms', 0)}ms: {result.get('message', '')}"
-                        )
-                
-                time.sleep(0.1)
-            
+            # For other commands, also don't wait for response - just queue and return success
+            logger.info(f"Queued {cmd_type_name} command for agent {agent_id} (command ID: {command.command_id})")
             return agent_pb2.SendCommandResponse(
-                success=False,
-                message=f"Command execution timed out after {timeout} seconds."
+                success=True,
+                message=f"{cmd_type_name} command queued for delivery to agent {agent_id}"
             )
             
         except Exception as e:

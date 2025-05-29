@@ -1,0 +1,53 @@
+# EDR Agent Configuration File
+# This file contains all configuration options for the EDR Agent
+# You can customize these values according to your environment
+
+# Server Configuration
+server_address: "localhost:50051"  # EDR server address (host:port)
+use_tls: true                      # Enable TLS encryption for server communication
+
+# Agent Identification
+agent_id: ""                       # Agent ID (leave empty for auto-generation)
+agent_version: "1.0.0"            # Agent version
+
+# File Paths
+log_file: ""                       # Log file path (leave empty for console output)
+data_dir: "data"                   # Directory for agent data storage
+
+# Logging Configuration
+log_level: "info"                  # Log level: debug, info, warn, error
+log_format: "console"              # Log format: console, json
+
+# Timing Configuration (in minutes)
+scan_interval: 5                   # IOC scan interval
+metrics_interval: 30               # System metrics reporting interval
+
+# Connection Configuration (in seconds)
+connection_timeout: 30             # Connection timeout
+reconnect_delay: 5                 # Delay between reconnection attempts
+max_reconnect_delay: 60            # Maximum reconnection delay
+ioc_update_delay: 3                # Delay before requesting IOC updates
+shutdown_timeout: 500              # Shutdown timeout (milliseconds)
+
+# System Monitoring Configuration
+cpu_sample_duration: 500           # CPU sampling duration (milliseconds)
+
+# Windows-specific Configuration
+sysmon_log_path: "C:\\Windows\\System32\\winevt\\Logs\\Microsoft-Windows-Sysmon%4Operational.evtx"
+hosts_file_path: "C:\\Windows\\System32\\drivers\\etc\\hosts"
+blocked_ip_redirect: "127.0.0.1"   # IP address to redirect blocked domains to
+
+# Configuration Notes:
+# - All timing values are validated against minimum and maximum limits
+# - The agent will auto-generate an ID if not specified
+# - TLS is recommended for production environments
+# - Log files will be created automatically if they don't exist
+# - Data directory will be created automatically if it doesn't exist
+
+# Configuration Validation Limits:
+# - scan_interval: 1-1440 minutes (1 minute to 24 hours)
+# - metrics_interval: 1-1440 minutes (1 minute to 24 hours)
+# - connection_timeout: 5-300 seconds (5 seconds to 5 minutes)
+# - reconnect_delay: must be > 0
+# - max_reconnect_delay: must be >= reconnect_delay
+# - blocked_ip_redirect: must be a valid IP address 

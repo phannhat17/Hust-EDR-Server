@@ -68,7 +68,7 @@ The system now features a true real-time command delivery mechanism that elimina
 
 ### Regenerating Protocol Buffers
 
-If you update the protocol buffer definitions in `unified_edr.proto`, you need to regenerate the code:
+If you update the protocol buffer definitions in the agent's `agent.proto` file, you need to regenerate the code:
 
 ```
 ./regenerate_proto.sh
@@ -84,28 +84,21 @@ python server.py
 
 ## Testing Commands
 
-1. List registered agents:
-   ```
-   python send_command.py list
-   ```
+Commands can be sent to agents through the REST API endpoints. Use the `/api/commands/send` endpoint to dispatch commands to registered agents.
 
-2. Send a command to an agent:
-   ```
-   python send_command.py delete --agent [AGENT_ID] --path [FILE_PATH]
-   ```
+### Available Commands
 
-### Additional Commands
-
-- `kill`: Kill a process by PID
-- `kill-tree`: Kill a process and its children
-- `block-ip`: Block an IP address
-- `block-url`: Block access to a URL
-- `isolate`: Isolate the machine from the network
-- `restore`: Restore network connectivity
+- `DELETE_FILE`: Delete a file by path
+- `KILL_PROCESS`: Kill a process by PID
+- `KILL_PROCESS_TREE`: Kill a process and its children
+- `BLOCK_IP`: Block an IP address
+- `BLOCK_URL`: Block access to a URL
+- `ISOLATE_NETWORK`: Isolate the machine from the network
+- `RESTORE_NETWORK`: Restore network connectivity
 
 ## Implementation Notes for Developers
 
-### New Real-time Command Flow
+### Real-time Command Flow
 
 1. **Frontend to Backend**:
    When a user sends a command from the frontend, it calls the `/api/commands/send` endpoint, which in turn calls the gRPC `SendCommand` method.
@@ -141,13 +134,15 @@ python server.py
 backend/
 ├── app/                # Application code
 │   ├── grpc/          # gRPC server implementation
-│   └── config/        # Configuration files
+│   ├── api/           # REST API routes
+│   ├── config/        # Configuration files
+│   └── utils/         # Utility functions
 ├── data/              # Data storage
 │   ├── agents.json    # Registered agents
 │   ├── commands.json  # Pending commands
 │   └── command_results.json  # Command execution results
-├── agent_commands.proto  # Protocol definitions
-├── send_command.py    # Command-line tool
+├── elastalert/        # ElastAlert configuration
+├── logs/              # Application logs
 └── server.py          # Server entry point
 ```
 

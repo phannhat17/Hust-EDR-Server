@@ -7,7 +7,7 @@ import grpc
 from flask import Blueprint, jsonify, request, current_app
 from app.grpc import agent_pb2, agent_pb2_grpc
 from app.config.config import config
-from app.utils.agent_commands import create_grpc_client, send_command_to_agent
+from app.utils.agent_commands import create_grpc_client, send_command_to_agent, get_online_agents
 
 # Set up logger
 logger = logging.getLogger(__name__)
@@ -129,25 +129,74 @@ def send_command():
         if agent_id not in agents_data:
             return jsonify({"error": f"Agent with ID {agent_id} does not exist"}), 404
         
-        # Send command to agent
-        success, message, command_id = send_command_to_agent(
-            agent_id=agent_id,
-            command_type=command_type,
-            params=params,
-            priority=data.get('priority', 1),
-            timeout=data.get('timeout', 60)
-        )
+        # Check if agent is online before sending command
+        online_agents = get_online_agents()
+        if agent_id not in online_agents:
+            return jsonify({"error": f"Agent with ID {agent_id} is not online"}), 400
         
+        # Get command type name for logging
+        command_type_name = convert_command_type_to_string(command_type)
+        logger.info(f"Sending {command_type_name} command to agent {agent_id}")
+        
+        # Implement a retry mechanism with backoff like IOC updates
+        max_retries = 3
+        retry_count = 0
+        success = False
+        last_message = ""
+        last_command_id = None
+        
+        while retry_count < max_retries and not success:
+            if retry_count > 0:
+                # Add increasing delay between retries
+                delay = retry_count * 0.5
+                logger.info(f"Retrying send command to agent {agent_id} (attempt {retry_count+1}/{max_retries}) after {delay}s delay")
+                time.sleep(delay)
+            
+            try:
+                # Add a small delay to prevent race conditions
+                time.sleep(0.2)
+                
+                success_result, message, command_id = send_command_to_agent(
+                    agent_id=agent_id,
+                    command_type=command_type,
+                    params=params,
+                    priority=data.get('priority', 1),
+                    timeout=data.get('timeout', 60)
+                )
+                
+                if success_result:
+                    logger.info(f"{command_type_name} command queued for agent {agent_id} (command ID: {command_id})")
+                    success = True
+                    last_message = message
+                    last_command_id = command_id
+                    break
+                else:
+                    logger.warning(f"Failed to queue {command_type_name} command for agent {agent_id}: {message}")
+                    last_message = message
+                    
+            except Exception as e:
+                logger.error(f"Exception sending {command_type_name} command to agent {agent_id}: {e}")
+                last_message = str(e)
+            
+            retry_count += 1
+        
+        # Log the final result
         if success:
+            logger.info(f"Successfully sent {command_type_name} command after {retry_count+1} attempts")
             return jsonify({
                 "success": True,
-                "command_id": command_id,
-                "message": message
+                "command_id": last_command_id,
+                "message": last_message,
+                "attempts": retry_count + 1,
+                "command_type": command_type_name
             })
         else:
+            logger.warning(f"Failed to send {command_type_name} command after {max_retries} attempts")
             return jsonify({
                 "success": False,
-                "message": message
+                "message": f"Failed after {max_retries} attempts: {last_message}",
+                "attempts": retry_count + 1,
+                "command_type": command_type_name
             }), 500
             
     except Exception as e:

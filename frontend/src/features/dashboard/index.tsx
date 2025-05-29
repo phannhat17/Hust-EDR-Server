@@ -15,7 +15,7 @@ import { ThemeSwitch } from '@/components/theme-switch'
 import { Overview } from './components/overview'
 import { useQuery } from '@tanstack/react-query'
 import { dashboardApi } from '@/lib/api'
-import { RefreshCw, ShieldAlert, Server, Book } from 'lucide-react'
+import { RefreshCw, ShieldAlert, Server, Book, ExternalLink } from 'lucide-react'
 import { useState } from 'react'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Agent } from '@/lib/types'
@@ -73,6 +73,13 @@ export default function Dashboard() {
                 <SelectItem value="90d">Last 90 days</SelectItem>
               </SelectContent>
             </Select>
+            <Button 
+              variant="secondary"
+              onClick={() => window.open('https://192.168.133.134:5601/app/r/s/XBF33', '_blank')}
+            >
+              <ExternalLink className="mr-2 h-4 w-4" />
+              SIEM Dashboard
+            </Button>
             <Button variant="outline">
               <RefreshCw className="mr-2 h-4 w-4" />
               Refresh

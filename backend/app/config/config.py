@@ -23,6 +23,9 @@ class Config:
     
     # TLS Certificates directory
     CERT_DIR = os.environ.get('CERT_DIR', os.path.join(BASE_DIR, 'cert'))
+
+    # Script directory for installation
+    SCRIPT_DIR = os.environ.get('SCRIPT_DIR', os.path.join(BASE_DIR, 'install_agent_script'))
     
     # TLS configuration
     GRPC_USE_TLS = os.environ.get('GRPC_USE_TLS', 'false').lower() == 'true'

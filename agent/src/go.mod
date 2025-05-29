@@ -4,6 +4,7 @@ go 1.20
 
 require (
 	github.com/denisbrodbeck/machineid v1.0.1
+	github.com/rs/zerolog v1.31.0
 	github.com/shirou/gopsutil/v3 v3.23.6
 	google.golang.org/grpc v1.53.0
 	google.golang.org/protobuf v1.28.1

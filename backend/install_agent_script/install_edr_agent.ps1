@@ -12,7 +12,7 @@ if ($gRPCHost -notlike "*:*") {
 }
 
 # Set download URL and installation paths
-$edrAgentUrl = "https://github.com/phannhat17/Hust-EDR-Server/releases/download/dev-fix-iocs/edr-agent.exe"
+$edrAgentUrl = "http://192.168.133.145:5000/api/install/edr-agent-binary"
 $edrDir = "C:\Program Files\Hust-EDR-Agent"
 $edrExe = "$edrDir\edr-agent.exe"
 $serviceName = "HustEDRAgent"
@@ -343,12 +343,7 @@ if (-not $service -or $service.Status -ne "Running") {
 [System.Environment]::SetEnvironmentVariable("EDR_HOME", $edrDir, [System.EnvironmentVariableTarget]::Machine)
 Write-Host "Added EDR_HOME environment variable pointing to $edrDir"
 
-# Clean up NSSM files
-Write-Host "Cleaning up NSSM installation files..."
-if (Test-Path $nssmDir) {
-    Remove-Item -Path $nssmDir -Recurse -Force -ErrorAction SilentlyContinue
-    Write-Host "NSSM directory removed."
-}
+
 if (Test-Path $nssmZip) {
     Remove-Item -Path $nssmZip -Force -ErrorAction SilentlyContinue
     Write-Host "NSSM zip file removed."

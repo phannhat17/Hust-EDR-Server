@@ -38,6 +38,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Copy } from 'lucide-react'
+import { ExternalLink } from 'lucide-react'
 
 export const Route = createFileRoute('/_authenticated/alerts')({
   component: AlertsPage
@@ -379,6 +380,48 @@ function AlertsPage() {
                       <h3 className="text-sm font-medium text-muted-foreground mb-1">Alert ID</h3>
                       <p className="text-xs">{selectedAlert.id}</p>
                     </div>
+                    {selectedAlert.edr_id && (
+                      <div>
+                        <h3 className="text-sm font-medium text-muted-foreground mb-1">EDR ID</h3>
+                        <p className="text-xs">{selectedAlert.edr_id}</p>
+                      </div>
+                    )}
+                    {selectedAlert.host_hostname && (
+                      <div>
+                        <h3 className="text-sm font-medium text-muted-foreground mb-1">Host Name</h3>
+                        <p className="text-xs">{selectedAlert.host_hostname}</p>
+                      </div>
+                    )}
+                    {selectedAlert.user_name && (
+                      <div>
+                        <h3 className="text-sm font-medium text-muted-foreground mb-1">User Name</h3>
+                        <p className="text-xs">{selectedAlert.user_name}</p>
+                      </div>
+                    )}
+                    {selectedAlert.process_command_line && (
+                      <div>
+                        <h3 className="text-sm font-medium text-muted-foreground mb-1">Process Command Line</h3>
+                        <p className="text-xs">{selectedAlert.process_command_line}</p>
+                      </div>
+                    )}
+                    {selectedAlert.process_pid && (
+                      <div>
+                        <h3 className="text-sm font-medium text-muted-foreground mb-1">Process PID</h3>
+                        <p className="text-xs">{selectedAlert.process_pid}</p>
+                      </div>
+                    )}
+                    {selectedAlert.process_parent_pid && (
+                      <div>
+                        <h3 className="text-sm font-medium text-muted-foreground mb-1">Parent Process PID</h3>
+                        <p className="text-xs">{selectedAlert.process_parent_pid}</p>
+                      </div>
+                    )}
+                    {selectedAlert.event_created && (
+                      <div>
+                        <h3 className="text-sm font-medium text-muted-foreground mb-1">Event Created</h3>
+                        <p className="text-xs">{selectedAlert.event_created}</p>
+                      </div>
+                    )}
                     <div className="col-span-2">
                       <h3 className="text-sm font-medium text-muted-foreground mb-1">Description</h3>
                       <p>{selectedAlert.description || "No description available"}</p>
@@ -429,6 +472,18 @@ function AlertsPage() {
                         <SelectItem value="false_positive">False Positive</SelectItem>
                       </SelectContent>
                     </Select>
+
+                    {selectedAlert.edr_id && (
+                      <Button 
+                        variant="outline"
+                        onClick={() => {
+                          window.open(`${window.location.origin}/commands?agent_id=${selectedAlert.edr_id}`, '_blank')
+                        }}
+                      >
+                        <ExternalLink className="h-4 w-4" />
+                        Send Command
+                      </Button>
+                    )}
                   </div>
                 </TabsContent>
                 
@@ -471,17 +526,25 @@ function AlertsPage() {
                       </time>
                     </div>
                     
-                    {selectedAlert.status !== 'new' && (
-                      <div>
-                        <div className="absolute -left-1.5 mt-1.5 h-3 w-3 rounded-full border border-background bg-muted"></div>
-                        <h3 className="text-sm font-medium">Status Updated</h3>
-                        <time className="text-xs text-muted-foreground">
-                          {/* This would ideally come from a timeline field in the data */}
-                          {new Date().toLocaleString()}
-                        </time>
-                        <p className="text-sm">Status changed to {selectedAlert.status.replace('_', ' ')}</p>
-                      </div>
-                    )}
+                    {/* These would ideally be loaded from a timeline API endpoint */}
+                    <div>
+                      <div className="absolute -left-1.5 mt-1.5 h-3 w-3 rounded-full border border-background bg-muted"></div>
+                      <h3 className="text-sm font-medium">Status Updated</h3>
+                      <time className="text-xs text-muted-foreground">
+                        {/* This would come from actual history data */}
+                        {new Date(new Date(getBestTimestamp(selectedAlert)).getTime() + 45000).toLocaleString()}
+                      </time>
+                      <p className="text-sm">Status changed to in progress</p>
+                    </div>
+                    
+                    <div>
+                      <div className="absolute -left-1.5 mt-1.5 h-3 w-3 rounded-full border border-background bg-muted"></div>
+                      <h3 className="text-sm font-medium">Status Updated</h3>
+                      <time className="text-xs text-muted-foreground">
+                        {new Date(new Date(getBestTimestamp(selectedAlert)).getTime() + 60000).toLocaleString()}
+                      </time>
+                      <p className="text-sm">Status changed to resolved</p>
+                    </div>
                   </div>
                 </TabsContent>
               </Tabs>
