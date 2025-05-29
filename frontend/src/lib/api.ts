@@ -196,7 +196,22 @@ export const rulesApi = {
   },
   
   restartElastAlert: async () => {
-    const response = await api.post('/api/elastalert/restart')
+    const response = await api.post('/api/rules/elastalert/restart')
+    return response.data
+  },
+
+  stopElastAlert: async () => {
+    const response = await api.post('/api/rules/elastalert/stop', {}, { timeout: 60000 })
+    return response.data
+  },
+
+  startElastAlert: async () => {
+    const response = await api.post('/api/rules/elastalert/start', {}, { timeout: 30000 })
+    return response.data
+  },
+
+  getElastAlertStatus: async () => {
+    const response = await api.get('/api/rules/elastalert/status')
     return response.data
   }
 }

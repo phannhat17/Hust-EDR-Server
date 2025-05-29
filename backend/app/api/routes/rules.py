@@ -221,3 +221,49 @@ def restart_elastalert():
         return jsonify({'message': 'ElastAlert restarted successfully'})
     else:
         return jsonify({'error': 'Failed to restart ElastAlert'}), 500
+
+@rules_bp.route('/elastalert/stop', methods=['POST'])
+def stop_elastalert():
+    """Stop the ElastAlert Docker container."""
+    elastalert_client = current_app.config['elastalert_client']
+    success = elastalert_client._stop_elastalert()
+    
+    if success:
+        return jsonify({'message': 'ElastAlert stopped successfully'})
+    else:
+        return jsonify({'error': 'Failed to stop ElastAlert'}), 500
+
+@rules_bp.route('/elastalert/start', methods=['POST'])
+def start_elastalert():
+    """Start the ElastAlert Docker container."""
+    elastalert_client = current_app.config['elastalert_client']
+    success = elastalert_client._start_elastalert()
+    
+    if success:
+        return jsonify({'message': 'ElastAlert started successfully'})
+    else:
+        return jsonify({'error': 'Failed to start ElastAlert'}), 500
+
+@rules_bp.route('/elastalert/status', methods=['GET'])
+def get_elastalert_status():
+    """Get the status of the ElastAlert Docker container."""
+    elastalert_client = current_app.config['elastalert_client']
+    status = elastalert_client._get_elastalert_status()
+    
+    return jsonify({
+        'status': status,
+        'is_running': status == 'running'
+    })
+
+@rules_bp.route('/elastalert/status', methods=['OPTIONS'])
+@rules_bp.route('/elastalert/stop', methods=['OPTIONS'])
+@rules_bp.route('/elastalert/start', methods=['OPTIONS'])
+@rules_bp.route('/elastalert/restart', methods=['OPTIONS'])
+def handle_elastalert_options():
+    """Handle CORS preflight requests for ElastAlert endpoints."""
+    from flask import make_response
+    response = make_response()
+    response.headers.add("Access-Control-Allow-Origin", "*")
+    response.headers.add('Access-Control-Allow-Headers', "Content-Type,Authorization,X-API-Key")
+    response.headers.add('Access-Control-Allow-Methods', "GET,POST,OPTIONS")
+    return response

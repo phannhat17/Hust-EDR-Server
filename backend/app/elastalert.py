@@ -395,4 +395,46 @@ class ElastAlertClient:
             return True
         except Exception as e:
             logger.error(f"Error restarting ElastAlert container: {e}")
-            return False 
+            return False
+
+    def _stop_elastalert(self):
+        """Stop the ElastAlert Docker container."""
+        try:
+            container_name = config.ELASTALERT_CONTAINER
+            subprocess.run(['docker', 'stop', container_name], check=True)
+            logger.info(f"Stopped ElastAlert container: {container_name}")
+            return True
+        except Exception as e:
+            logger.error(f"Error stopping ElastAlert container: {e}")
+            return False
+
+    def _start_elastalert(self):
+        """Start the ElastAlert Docker container."""
+        try:
+            container_name = config.ELASTALERT_CONTAINER
+            subprocess.run(['docker', 'start', container_name], check=True)
+            logger.info(f"Started ElastAlert container: {container_name}")
+            return True
+        except Exception as e:
+            logger.error(f"Error starting ElastAlert container: {e}")
+            return False
+
+    def _get_elastalert_status(self):
+        """Get the status of the ElastAlert Docker container."""
+        try:
+            container_name = config.ELASTALERT_CONTAINER
+            result = subprocess.run(
+                ['docker', 'inspect', '--format={{.State.Status}}', container_name], 
+                capture_output=True, 
+                text=True, 
+                check=True
+            )
+            status = result.stdout.strip()
+            logger.info(f"ElastAlert container status: {status}")
+            return status
+        except subprocess.CalledProcessError:
+            logger.warning(f"ElastAlert container {config.ELASTALERT_CONTAINER} not found or not accessible")
+            return "not_found"
+        except Exception as e:
+            logger.error(f"Error getting ElastAlert container status: {e}")
+            return "error" 
