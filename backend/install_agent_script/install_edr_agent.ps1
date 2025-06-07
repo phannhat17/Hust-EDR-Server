@@ -1,27 +1,37 @@
 # Install EDR Agent Script for Windows
-# This script downloads and installs the EDR agent as a Windows service
+# This script downloads and installs the HUST-EDR agent as a Windows service
 # Must be run with administrator privileges
 
+# Get server host and other parameters
 param(
-    [string]$gRPCHost = "localhost:50051"
+    [string]$ServerHost = "localhost:5000",
+    [string]$gRPCHost = "localhost:50051",
+    [string]$UseTLS = "true",
+    [bool]$InsecureSkipVerify = $false
 )
 
-# Format gRPC host - ensure it has protocol and port
+# Format gRPC host - ensure it has proper format
 if ($gRPCHost -notlike "*:*") {
     $gRPCHost = "$gRPCHost:50051"
 }
 
-# Set download URL and installation paths
-$edrAgentUrl = "http://192.168.133.145:5000/api/install/edr-agent-binary"
-$edrDir = "C:\Program Files\Hust-EDR-Agent"
+# Set download URLs
+$edrAgentUrl = "http://$ServerHost/api/install/edr-agent-binary"
+$caCertUrl = "http://$ServerHost/api/install/ca-cert"
+$nssmUrl = "https://nssm.cc/release/nssm-2.24.zip"
+
+# Set installation paths
+$edrDir = "C:\Program Files\HUST-EDR"
+$tempDir = "$env:TEMP\HustEDRInstall"
 $edrExe = "$edrDir\edr-agent.exe"
 $serviceName = "HustEDRAgent"
 
-# NSSM settings
-$nssmUrl = "https://nssm.cc/release/nssm-2.24.zip"
-$nssmZip = "$env:TEMP\nssm.zip"
+# All subdirectories within the main EDR directory
+$dataDir = "$edrDir\data"
+$logDir = "$edrDir\logs"
+$certDir = "$edrDir\certs"
 $nssmDir = "$edrDir\nssm"
-$nssmExe = "$nssmDir\nssm-2.24\win64\nssm.exe"
+$configFile = "$edrDir\config.yaml"
 
 # Check for administrator privileges
 $currentPrincipal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
@@ -30,10 +40,13 @@ if (-not $currentPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Adm
     exit 1
 }
 
-# Create EDR directory if it doesn't exist
-if (!(Test-Path $edrDir)) {
-    Write-Host "Creating EDR directory: $edrDir"
-    New-Item -ItemType Directory -Path $edrDir -Force | Out-Null
+# Create HUST-EDR directory structure
+Write-Host "Creating HUST-EDR directory structure..." -ForegroundColor Yellow
+foreach ($dir in @($edrDir, $dataDir, $logDir, $certDir, $nssmDir, $tempDir)) {
+    if (!(Test-Path $dir)) {
+        Write-Host "Creating directory: $dir"
+        New-Item -ItemType Directory -Path $dir -Force | Out-Null
+    }
 }
 
 # Function for faster downloads using .NET WebClient
@@ -48,48 +61,22 @@ function Download-File {
     $webClient.DownloadFile($Url, $OutputFile)
 }
 
-# Create logs and data directories
-$dataDir = "$env:PROGRAMDATA\HustEDRAgent"
-if (!(Test-Path $dataDir)) {
-    Write-Host "Creating data directory: $dataDir"
-    New-Item -ItemType Directory -Path $dataDir -Force | Out-Null
-}
-$logDir = "$dataDir\logs"
-if (!(Test-Path $logDir)) {
-    Write-Host "Creating logs directory: $logDir"
-    New-Item -ItemType Directory -Path $logDir -Force | Out-Null
-}
-
-# Delete and stop the service if it already exists
+# Stop and remove existing service if it exists
 if (Get-Service $serviceName -ErrorAction SilentlyContinue) {
-    Write-Host "Stopping existing EDR Agent service..."
+    Write-Host "Stopping existing HUST-EDR Agent service..."
     Stop-Service -Name $serviceName -Force -ErrorAction SilentlyContinue
     Start-Sleep -s 2
     
     # Force kill any lingering processes
-    $processName = "edr-agent"
-    Get-Process | Where-Object {$_.ProcessName -eq $processName} | Stop-Process -Force -ErrorAction SilentlyContinue
+    Get-Process | Where-Object {$_.ProcessName -eq "edr-agent"} | Stop-Process -Force -ErrorAction SilentlyContinue
     
-    Write-Host "Removing existing EDR Agent service..."
+    Write-Host "Removing existing HUST-EDR Agent service..."
     & sc.exe delete $serviceName
     Start-Sleep -s 2
 }
 
-# Make sure registry keys are cleaned up
-$registryPaths = @(
-    "HKLM:\SYSTEM\CurrentControlSet\Services\$serviceName",
-    "HKLM:\SYSTEM\CurrentControlSet\Services\EventLog\Application\$serviceName"
-)
-
-foreach ($path in $registryPaths) {
-    if (Test-Path $path) {
-        Write-Host "Removing registry key: $path"
-        Remove-Item -Path $path -Recurse -Force -ErrorAction SilentlyContinue
-    }
-}
-
-# Download EDR Agent
-Write-Host "Downloading EDR Agent..."
+# Download EDR Agent binary
+Write-Host "Downloading HUST-EDR Agent..."
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 try {
     # Use faster WebClient instead of Invoke-WebRequest
@@ -108,103 +95,87 @@ try {
     }
 }
 
-# Test the executable first to make sure it works
-Write-Host "Testing EDR Agent executable..."
-$agentIdFromTest = $null
-try {
-    $configDir = "$env:PROGRAMDATA\HustEDRAgent"
-    if (!(Test-Path $configDir)) {
-        New-Item -ItemType Directory -Path $configDir -Force | Out-Null
-    }
+# Download CA Certificate if TLS is enabled
+$caCertPath = ""
+$useTLSBool = $true
+if ($UseTLS -eq "false" -or $UseTLS -eq $false) {
+    $useTLSBool = $false
+    Write-Host "TLS disabled - skipping CA certificate download" -ForegroundColor Yellow
+} else {
+    Write-Host "TLS enabled - downloading CA certificate..." -ForegroundColor Yellow
+    $caCertFile = "$certDir\ca.crt"
     
-    # Create an initial config file for the test with empty agent ID
-    $configFilePath = "$configDir\config.yaml"
-    $logFileEscaped = $logDir.Replace("\", "/") + "/edr-agent.log"
-    $dataFileEscaped = $configDir.Replace("\", "/") + "/data"
-    @"
-server_address: $gRPCHost
+    try {
+        Download-File -Url $caCertUrl -OutputFile $caCertFile
+        
+        if (Test-Path $caCertFile) {
+            $caCertPath = $caCertFile
+            Write-Host "CA certificate downloaded successfully: $caCertFile" -ForegroundColor Green
+        } else {
+            Write-Host "Failed to download CA certificate - continuing without it" -ForegroundColor Yellow
+        }
+    } catch {
+        Write-Host "Warning: Could not download CA certificate. You may need to add it manually." -ForegroundColor Yellow
+    }
+}
+
+# Create comprehensive configuration file
+Write-Host "Creating HUST-EDR Agent configuration..."
+$configContent = @"
+# HUST-EDR Agent Configuration File
+# Server Configuration
+server_address: "$gRPCHost"
+use_tls: $($useTLSBool.ToString().ToLower())
+
+# TLS/Certificate Configuration
+ca_cert_path: "$($caCertPath.Replace("\", "/"))"
+insecure_skip_verify: $($InsecureSkipVerify.ToString().ToLower())
+
+# Agent Identification (will be auto-generated if empty)
 agent_id: ""
-log_file: "$logFileEscaped"
-data_dir: "$dataFileEscaped"
-scan_interval: 5
-metrics_interval: 2
-version: "1.0.1"
-"@ | Set-Content -Path $configFilePath
-    Write-Host "Created initial config file at $configFilePath" -ForegroundColor Green
-    
-    # Testing connection to gRPC server
-    Write-Host "Testing connection to gRPC server: $gRPCHost" -ForegroundColor Yellow
-    $processArgs = @("-config=`"$configFilePath`"")
-    $testProcess = Start-Process -FilePath $edrExe -ArgumentList $processArgs -NoNewWindow -PassThru
-    
-    # Wait a bit for registration to happen, but don't wait too long for test
-    $testTimeout = 15 # seconds
-    $testInterval = 1 # seconds
-    $elapsed = 0
-    
-    # Log the test output in real-time to see connection issues
-    $testLogFile = "$logDir\edr-agent-test.log"
-    while (-not $testProcess.HasExited -and $elapsed -lt $testTimeout) {
-        Write-Host "Waiting for test process... ($elapsed/$testTimeout seconds)" -ForegroundColor Yellow
-        if (Test-Path $configFilePath) {
-            $configContent = Get-Content -Path $configFilePath -Raw -ErrorAction SilentlyContinue
-            if ($configContent -match "agent_id:\s*""([^""]+)""" -and $matches[1] -ne "") {
-                $agentIdFromTest = $matches[1]
-                Write-Host "Retrieved agent ID from test: $agentIdFromTest" -ForegroundColor Green
-                break
-            }
-        }
-        Start-Sleep -s $testInterval
-        $elapsed += $testInterval
-    }
-    
-    # If still running after timeout, kill the process
-    if (-not $testProcess.HasExited) {
-        Write-Host "Test registration timeout, terminating test process" -ForegroundColor Yellow
-        Stop-Process -Id $testProcess.Id -Force -ErrorAction SilentlyContinue
-    }
-    
-    # Check if test was successful
-    if ($agentIdFromTest) {
-        # Now we have the agent ID, let's make sure our config file has it
-        $logFileEscaped = $logDir.Replace("\", "/") + "/edr-agent.log"
-        $dataFileEscaped = $configDir.Replace("\", "/") + "/data"
-        @"
-server_address: $gRPCHost
-agent_id: "$agentIdFromTest"
-log_file: "$logFileEscaped"
-data_dir: "$dataFileEscaped"
-scan_interval: 5
-metrics_interval: 2
-version: "1.0.1"
-"@ | Set-Content -Path $configFilePath
-        Write-Host "Updated config file with agent ID" -ForegroundColor Green
-        Write-Host "EDR Agent executable test successful." -ForegroundColor Green
-    } else {
-        # Test failed, but we'll try running the service directly
-        Write-Host "Could not obtain agent ID during test, will try during service installation" -ForegroundColor Yellow
-        if ($testProcess.ExitCode -ne $null) {
-            Write-Host "Test process exit code: $($testProcess.ExitCode)" -ForegroundColor Yellow
-        }
-    }
-} catch {
-    Write-Host "Error testing EDR Agent executable: $_" -ForegroundColor Yellow
-}
+agent_version: "1.0.0"
 
-# Download and install NSSM
+# File Paths
+log_file: "$($logDir.Replace("\", "/"))/edr-agent.log"
+data_dir: "$($dataDir.Replace("\", "/"))"
+
+# Logging Configuration
+log_level: "info"
+log_format: "console"
+
+# Timing Configuration (in minutes)
+scan_interval: 5
+metrics_interval: 30
+
+# Connection Configuration (in seconds)
+connection_timeout: 30
+reconnect_delay: 5
+max_reconnect_delay: 60
+ioc_update_delay: 3
+shutdown_timeout: 500
+
+# System Monitoring Configuration
+cpu_sample_duration: 500
+
+# Windows-specific Configuration
+sysmon_log_path: "C:\\Windows\\System32\\winevt\\Logs\\Microsoft-Windows-Sysmon%4Operational.evtx"
+hosts_file_path: "C:\\Windows\\System32\\drivers\\etc\\hosts"
+blocked_ip_redirect: "127.0.0.1"
+"@
+
+Set-Content -Path $configFile -Value $configContent -Encoding UTF8
+
+# Download and install NSSM (Non-Sucking Service Manager)
 Write-Host "Downloading NSSM (Non-Sucking Service Manager)..."
-if (!(Test-Path $nssmDir)) {
-    New-Item -ItemType Directory -Path $nssmDir -Force | Out-Null
-}
+$nssmZip = "$tempDir\nssm.zip"
+$nssmExe = "$nssmDir\nssm-2.24\win64\nssm.exe"
 
 try {
-    # Download NSSM
     Download-File -Url $nssmUrl -OutputFile $nssmZip
     
     # Extract NSSM
     Write-Host "Extracting NSSM..."
-    Add-Type -AssemblyName System.IO.Compression.FileSystem
-    [System.IO.Compression.ZipFile]::ExtractToDirectory($nssmZip, $nssmDir)
+    Expand-Archive -Path $nssmZip -DestinationPath $nssmDir -Force
     
     # Verify NSSM exists
     if (!(Test-Path $nssmExe)) {
@@ -215,74 +186,35 @@ try {
     exit 1
 }
 
-# Create log file paths
-$stdoutLog = "$logDir\edr-agent-stdout.log"
-$stderrLog = "$logDir\edr-agent-stderr.log"
-
 # Install service using NSSM
-Write-Host "Installing EDR Agent service using NSSM..."
-Write-Host "gRPC Server: $gRPCHost" -ForegroundColor Yellow
-
-# Create a new service
+Write-Host "Installing HUST-EDR Agent service..."
 try {
-    # Remove existing service if it exists (with confirmation suppressed)
+    # Remove existing service if it exists
     & $nssmExe remove $serviceName confirm 2>$null
+    Start-Sleep -s 2
     
-    # Allow a moment for any removal to complete
-    Start-Sleep -s 1
-    
-    # Make sure we have a valid config file
-    $configFilePath = "$env:PROGRAMDATA\HustEDRAgent\config.yaml"
-    if (-not (Test-Path $configFilePath)) {
-        # If config file doesn't exist, create it now
-        $logFileEscaped = $logDir.Replace("\", "/") + "/edr-agent.log"
-        $dataFileEscaped = "$env:PROGRAMDATA\HustEDRAgent".Replace("\", "/") + "/data"
-        @"
-server_address: $gRPCHost
-agent_id: ""
-log_file: "$logFileEscaped"
-data_dir: "$dataFileEscaped"
-scan_interval: 5
-metrics_interval: 2
-version: "1.0.1"
-"@ | Set-Content -Path $configFilePath
-        Write-Host "Created config file for service at $configFilePath" -ForegroundColor Green
-    }
-    
-    # Always install the service with config file
-    Write-Host "Installing service using config file: $configFilePath" -ForegroundColor Green
-    & $nssmExe install $serviceName $edrExe "-config `"$configFilePath`""
+    # Install service
+    & $nssmExe install $serviceName $edrExe "--config `"$configFile`""
     
     if ($LASTEXITCODE -ne 0) {
-        throw "NSSM returned exit code $LASTEXITCODE"
+        throw "NSSM installation failed with exit code $LASTEXITCODE"
     }
     
     Write-Host "Service installation successful" -ForegroundColor Green
 } catch {
     Write-Host "Error during service installation: $_" -ForegroundColor Red
-    
-    # Try alternative approach if the first one fails
-    Write-Host "Trying alternative installation method..." -ForegroundColor Yellow
-    try {
-        # Always use config file for alternative method too
-        & sc.exe create $serviceName binPath= "$edrExe -config $configFilePath" DisplayName= "EDR Agent Service" start= auto
-        
-        if ($LASTEXITCODE -ne 0) {
-            throw "sc.exe create returned exit code $LASTEXITCODE"
-        }
-        Write-Host "Alternative service installation successful" -ForegroundColor Green
-    } catch {
-        Write-Host "Alternative service installation also failed: $_" -ForegroundColor Red
-        exit 1
-    }
+    exit 1
 }
 
 # Configure service details
-& $nssmExe set $serviceName DisplayName "EDR Agent Service"
-& $nssmExe set $serviceName Description "Endpoint Detection and Response agent service"
+& $nssmExe set $serviceName DisplayName "HUST-EDR Agent Service"
+& $nssmExe set $serviceName Description "HUST-EDR Endpoint Detection and Response Agent"
 & $nssmExe set $serviceName Start SERVICE_AUTO_START
 
-# Configure stdout/stderr redirection
+# Configure log rotation
+$stdoutLog = "$logDir\edr-agent-stdout.log"
+$stderrLog = "$logDir\edr-agent-stderr.log"
+
 & $nssmExe set $serviceName AppStdout $stdoutLog
 & $nssmExe set $serviceName AppStderr $stderrLog
 & $nssmExe set $serviceName AppRotateFiles 1
@@ -291,28 +223,20 @@ version: "1.0.1"
 & $nssmExe set $serviceName AppRotateBytes 10485760
 
 # Start the service
-Write-Host "Starting EDR Agent service..."
-try {
-    Start-Service -Name $serviceName -ErrorAction Stop
-    Write-Host "Service start command issued successfully" -ForegroundColor Green
-} catch {
-    Write-Host "Error starting service: $_" -ForegroundColor Red
-    Write-Host "Will attempt to continue anyway..." -ForegroundColor Yellow
-}
+Write-Host "Starting HUST-EDR Agent service..."
+Start-Service -Name $serviceName
 
-# Wait for service to start with proper feedback
-$maxWaitTime = 30  # seconds
-$waitInterval = 3  # seconds
+# Wait for service to start
+$maxWaitTime = 30
+$waitInterval = 2
 $elapsed = 0
 
+Write-Host "Waiting for service to start..."
 while ($elapsed -lt $maxWaitTime) {
-    Write-Host "Waiting for service to start... ($elapsed/$maxWaitTime seconds)" -ForegroundColor Yellow
     $service = Get-Service $serviceName -ErrorAction SilentlyContinue
     
     if ($service -and $service.Status -eq "Running") {
-        Write-Host "EDR Agent service started successfully!" -ForegroundColor Green
-        Write-Host "Service stdout logs: $stdoutLog" -ForegroundColor Green
-        Write-Host "Service stderr logs: $stderrLog" -ForegroundColor Green
+        Write-Host "HUST-EDR Agent service started successfully!" -ForegroundColor Green
         break
     }
     
@@ -320,33 +244,47 @@ while ($elapsed -lt $maxWaitTime) {
     $elapsed += $waitInterval
 }
 
-# Final check
-$service = Get-Service $serviceName -ErrorAction SilentlyContinue
-if (-not $service -or $service.Status -ne "Running") {
-    Write-Host "WARNING: Service did not start within the expected time." -ForegroundColor Red
-    Write-Host "Current status: $($service.Status)" -ForegroundColor Red
-    Write-Host "Check logs for more information:" -ForegroundColor Yellow
-    Write-Host "  - Stdout: $stdoutLog" -ForegroundColor Yellow
-    Write-Host "  - Stderr: $stderrLog" -ForegroundColor Yellow
+# Check if service is running
+$service = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
+if ($service -and $service.Status -eq "Running") {
+    Write-Host "HUST-EDR Agent service is running!" -ForegroundColor Green
     
-    # Show log content if available
-    if (Test-Path $stderrLog) {
-        Write-Host "Last 10 lines of stderr log:" -ForegroundColor Yellow
-        Get-Content -Path $stderrLog -Tail 10
+    # Try to get the agent ID after a moment
+    Start-Sleep -s 5
+    $finalConfigContent = Get-Content -Path $configFile -Raw -ErrorAction SilentlyContinue
+    if ($finalConfigContent -match "agent_id:\s*""?([^""\s]+)""?" -and $matches[1] -ne "" -and $matches[1] -ne "agent_id:") {
+        $finalAgentId = $matches[1].Trim('"')
+        Write-Host "Agent ID: $finalAgentId" -ForegroundColor Cyan
     }
-    
-    # Don't exit here, as we want to complete the rest of the installation
-    Write-Host "Continuing with installation despite service start issues..." -ForegroundColor Yellow
+} else {
+    Write-Host "HUST-EDR Agent service is not running. Please check the logs." -ForegroundColor Red
+    Write-Host "Check logs at: $logDir" -ForegroundColor Yellow
 }
 
 # Create environment variable for EDR path
-[System.Environment]::SetEnvironmentVariable("EDR_HOME", $edrDir, [System.EnvironmentVariableTarget]::Machine)
-Write-Host "Added EDR_HOME environment variable pointing to $edrDir"
+[System.Environment]::SetEnvironmentVariable("HUST_EDR_HOME", $edrDir, [System.EnvironmentVariableTarget]::Machine)
+Write-Host "Added HUST_EDR_HOME environment variable pointing to $edrDir"
 
+# Clean up temporary files
+Write-Host "Cleaning up temporary files..."
+Remove-Item -Path $tempDir -Recurse -Force
 
-if (Test-Path $nssmZip) {
-    Remove-Item -Path $nssmZip -Force -ErrorAction SilentlyContinue
-    Write-Host "NSSM zip file removed."
-}
+# Final summary
+Write-Host "`n" + "="*60 -ForegroundColor Green
+Write-Host "HUST-EDR AGENT INSTALLATION COMPLETE!" -ForegroundColor Green
+Write-Host "="*60 -ForegroundColor Green
 
-Write-Host "EDR Agent installation complete in $edrDir" 
+Write-Host "`nInstallation Summary:" -ForegroundColor Cyan
+Write-Host "  Installation Directory: $edrDir" -ForegroundColor White
+Write-Host "  Configuration File: $configFile" -ForegroundColor White
+Write-Host "  Service Name: $serviceName" -ForegroundColor White
+Write-Host "  Service Status: $($service.Status)" -ForegroundColor $(if($service.Status -eq "Running"){"Green"}else{"Red"})
+Write-Host "  Server: $gRPCHost" -ForegroundColor White
+Write-Host "  TLS Enabled: $useTLSBool" -ForegroundColor White
+
+Write-Host "`nUseful Commands:" -ForegroundColor Yellow
+Write-Host "  Check service status: Get-Service $serviceName" -ForegroundColor White
+Write-Host "  View logs: Get-Content '$logDir\edr-agent.log' -Tail 20" -ForegroundColor White
+Write-Host "  Restart service: Restart-Service $serviceName" -ForegroundColor White
+
+Write-Host "HUST-EDR Agent installation complete in $edrDir" -ForegroundColor Green 
