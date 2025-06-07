@@ -22,6 +22,10 @@ const (
 	DefaultDataDir      = "data"
 	DefaultConfigFile   = "config.yaml"
 	
+	// TLS/Certificate defaults
+	DefaultCACertPath        = ""    // Path to CA certificate for server verification
+	DefaultInsecureSkipVerify = false // Whether to skip certificate verification
+	
 	// Logging defaults
 	DefaultLogLevel  = "info"
 	DefaultLogFormat = "console"
@@ -59,6 +63,10 @@ type Config struct {
 	// Server configuration
 	ServerAddress string `yaml:"server_address" json:"server_address"`
 	UseTLS        bool   `yaml:"use_tls" json:"use_tls"`
+	
+	// TLS/Certificate configuration
+	CACertPath        string `yaml:"ca_cert_path" json:"ca_cert_path"`               // Path to CA certificate for server verification
+	InsecureSkipVerify bool   `yaml:"insecure_skip_verify" json:"insecure_skip_verify"` // Skip certificate verification (not recommended for production)
 	
 	// Agent identification
 	AgentID      string `yaml:"agent_id" json:"agent_id"`
@@ -111,6 +119,8 @@ func NewDefaultConfig() *Config {
 	return &Config{
 		ServerAddress:       DefaultServerAddress,
 		UseTLS:             DefaultUseTLS,
+		CACertPath:         DefaultCACertPath,
+		InsecureSkipVerify: DefaultInsecureSkipVerify,
 		AgentVersion:       DefaultAgentVersion,
 		DataDir:            DefaultDataDir,
 		LogLevel:           DefaultLogLevel,
@@ -318,6 +328,17 @@ func (c *Config) Validate() error {
 		})
 	}
 	
+	// Validate CA certificate path if TLS is enabled and path is specified
+	if c.UseTLS && c.CACertPath != "" {
+		if _, err := os.Stat(c.CACertPath); os.IsNotExist(err) {
+			errors = append(errors, ValidationError{
+				Field:   "ca_cert_path",
+				Value:   c.CACertPath,
+				Message: "CA certificate file does not exist",
+			})
+		}
+	}
+	
 	// Return first error if any
 	if len(errors) > 0 {
 		return errors[0]
@@ -381,6 +402,10 @@ func (c *Config) generateYAMLWithComments() string {
 server_address: "%s"  # EDR server address (host:port)
 use_tls: %t                      # Enable TLS encryption for server communication
 
+# TLS/Certificate Configuration (only applies when use_tls is true)
+ca_cert_path: "%s"               # Path to CA certificate for server verification (leave empty to use system CA)
+insecure_skip_verify: %t          # Skip certificate verification (not recommended for production)
+
 # Agent Identification
 agent_id: "%s"                       # Agent ID (leave empty for auto-generation)
 agent_version: "%s"            # Agent version
@@ -411,9 +436,17 @@ cpu_sample_duration: %d           # CPU sampling duration (milliseconds)
 sysmon_log_path: "%s"
 hosts_file_path: "%s"
 blocked_ip_redirect: "%s"   # IP address to redirect blocked domains to
+
+# Certificate Verification Notes:
+# - If ca_cert_path is specified, the agent will use this CA certificate to verify the server
+# - If ca_cert_path is empty, the agent will use the system's default CA certificates
+# - Setting insecure_skip_verify to true bypasses all certificate verification (not recommended)
+# - For production environments, always use proper CA certificates and keep insecure_skip_verify false
 `,
 		c.ServerAddress,
 		c.UseTLS,
+		c.CACertPath,
+		c.InsecureSkipVerify,
 		c.AgentID,
 		c.AgentVersion,
 		c.LogFile,

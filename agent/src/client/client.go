@@ -7,6 +7,7 @@ import (
 	"log"
 	"math"
 	"math/rand"
+	"os"
 	"sync"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 	"crypto/tls"
+	"crypto/x509"
 
 	"github.com/shirou/gopsutil/v3/cpu"
 	"github.com/shirou/gopsutil/v3/mem"
@@ -65,20 +67,50 @@ func NewEDRClientWithConfig(cfg *config.Config) (*EDRClient, error) {
 	var err error
 
 	if cfg.UseTLS {
-		// Create the credentials and skip certificate verification for self-signed certs
-		creds := credentials.NewTLS(&tls.Config{
-			InsecureSkipVerify: true, // Skip certificate verification for testing
-		})
-
+		var creds credentials.TransportCredentials
+		
+		if cfg.InsecureSkipVerify {
+			// Skip certificate verification (not recommended for production)
+			creds = credentials.NewTLS(&tls.Config{
+				InsecureSkipVerify: true,
+			})
+			logging.Warn().
+				Str("server", cfg.ServerAddress).
+				Bool("insecure_skip_verify", true).
+				Msg("Connected to server with TLS but skipping certificate verification (not recommended for production)")
+		} else if cfg.CACertPath != "" {
+			// Use custom CA certificate for verification
+			caCert, err := os.ReadFile(cfg.CACertPath)
+			if err != nil {
+				return nil, fmt.Errorf("failed to read CA certificate file %s: %v", cfg.CACertPath, err)
+			}
+			
+			caCertPool := x509.NewCertPool()
+			if !caCertPool.AppendCertsFromPEM(caCert) {
+				return nil, fmt.Errorf("failed to parse CA certificate from %s", cfg.CACertPath)
+			}
+			
+			creds = credentials.NewTLS(&tls.Config{
+				RootCAs: caCertPool,
+			})
+			
+			logging.Info().
+				Str("server", cfg.ServerAddress).
+				Str("ca_cert_path", cfg.CACertPath).
+				Msg("Connected to server with TLS using custom CA certificate")
+		} else {
+			// Use system CA certificates for verification
+			creds = credentials.NewTLS(&tls.Config{})
+			
+			logging.Info().
+				Str("server", cfg.ServerAddress).
+				Msg("Connected to server with TLS using system CA certificates")
+		}
+		
 		conn, err = grpc.Dial(cfg.ServerAddress, grpc.WithTransportCredentials(creds))
 		if err != nil {
 			return nil, fmt.Errorf("failed to connect to server with TLS: %v", err)
 		}
-		
-		logging.Info().
-			Str("server", cfg.ServerAddress).
-			Bool("tls", true).
-			Msg("Connected to server with TLS encryption (insecure mode)")
 	} else {
 		// Connect without TLS (insecure)
 		conn, err = grpc.Dial(cfg.ServerAddress, grpc.WithTransportCredentials(insecure.NewCredentials()))
