@@ -45,7 +45,6 @@ const (
 	DefaultCPUSampleDuration = 500 // milliseconds
 	
 	// Windows-specific defaults
-	DefaultSysmonLogPath = "C:\\Windows\\System32\\winevt\\Logs\\Microsoft-Windows-Sysmon%4Operational.evtx"
 	DefaultHostsFilePath = "C:\\Windows\\System32\\drivers\\etc\\hosts"
 	DefaultBlockedIPRedirect = "127.0.0.1"
 	
@@ -95,7 +94,6 @@ type Config struct {
 	CPUSampleDuration int `yaml:"cpu_sample_duration" json:"cpu_sample_duration"` // milliseconds
 	
 	// Windows-specific configuration
-	SysmonLogPath     string `yaml:"sysmon_log_path" json:"sysmon_log_path"`
 	HostsFilePath     string `yaml:"hosts_file_path" json:"hosts_file_path"`
 	BlockedIPRedirect string `yaml:"blocked_ip_redirect" json:"blocked_ip_redirect"`
 	
@@ -133,7 +131,6 @@ func NewDefaultConfig() *Config {
 		IOCUpdateDelay:     DefaultIOCUpdateDelay,
 		ShutdownTimeout:    DefaultShutdownTimeout,
 		CPUSampleDuration:  DefaultCPUSampleDuration,
-		SysmonLogPath:      DefaultSysmonLogPath,
 		HostsFilePath:      DefaultHostsFilePath,
 		BlockedIPRedirect:  DefaultBlockedIPRedirect,
 		ConfigFile:         DefaultConfigFile,
@@ -303,14 +300,6 @@ func (c *Config) Validate() error {
 	}
 	
 	// Validate file paths
-	if c.SysmonLogPath == "" {
-		errors = append(errors, ValidationError{
-			Field:   "sysmon_log_path",
-			Value:   c.SysmonLogPath,
-			Message: "sysmon log path cannot be empty",
-		})
-	}
-	
 	if c.HostsFilePath == "" {
 		errors = append(errors, ValidationError{
 			Field:   "hosts_file_path",
@@ -433,7 +422,6 @@ shutdown_timeout: %d              # Shutdown timeout (milliseconds)
 cpu_sample_duration: %d           # CPU sampling duration (milliseconds)
 
 # Windows-specific Configuration
-sysmon_log_path: "%s"
 hosts_file_path: "%s"
 blocked_ip_redirect: "%s"   # IP address to redirect blocked domains to
 
@@ -461,7 +449,6 @@ blocked_ip_redirect: "%s"   # IP address to redirect blocked domains to
 		c.IOCUpdateDelay,
 		c.ShutdownTimeout,
 		c.CPUSampleDuration,
-		c.SysmonLogPath,
 		c.HostsFilePath,
 		c.BlockedIPRedirect,
 	)

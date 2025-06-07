@@ -104,7 +104,6 @@ Override any setting using command-line flags:
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `sysmon_log_path` | string | `C:\Windows\System32\winevt\Logs\Microsoft-Windows-Sysmon%4Operational.evtx` | Sysmon log file path |
 | `hosts_file_path` | string | `C:\Windows\System32\drivers\etc\hosts` | Windows hosts file path |
 | `blocked_ip_redirect` | string | `127.0.0.1` | IP address for blocked domains |
 

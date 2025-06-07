@@ -158,7 +158,6 @@ shutdown_timeout: 500
 cpu_sample_duration: 500
 
 # Windows-specific Configuration
-sysmon_log_path: "C:\\Windows\\System32\\winevt\\Logs\\Microsoft-Windows-Sysmon%4Operational.evtx"
 hosts_file_path: "C:\\Windows\\System32\\drivers\\etc\\hosts"
 blocked_ip_redirect: "127.0.0.1"
 "@
