@@ -24,7 +24,7 @@ log_format: "console"              # Log format: console, json
 
 # Timing Configuration (in minutes)
 scan_interval: 5                   # IOC scan interval
-metrics_interval: 30               # System metrics reporting interval
+metrics_interval: 5                # System metrics reporting interval (must be less than server timeout of 10 minutes)
 
 # Connection Configuration (in seconds)
 connection_timeout: 30             # Connection timeout

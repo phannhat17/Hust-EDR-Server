@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
@@ -123,14 +124,19 @@ func main() {
 
 	log.Printf("Registered with server as agent ID: %s", agentInfo.AgentID)
 	
-	// If agent ID was newly assigned, update config and save
+	// Always save agent ID if it's empty or different from server response
+	log.Printf("DEBUG: cfg.AgentID='%s', agentInfo.AgentID='%s'", cfg.AgentID, agentInfo.AgentID)
+	
 	if cfg.AgentID == "" || cfg.AgentID != agentInfo.AgentID {
+		log.Printf("DEBUG: Condition met, saving config...")
 		cfg.AgentID = agentInfo.AgentID
 		if err := cfg.SaveConfig(*configFile); err != nil {
 			log.Printf("Failed to save updated config: %v", err)
 		} else {
-			log.Printf("Updated configuration with assigned agent ID")
+			log.Printf("Updated configuration with assigned agent ID: %s", agentInfo.AgentID)
 		}
+	} else {
+		log.Printf("DEBUG: Condition NOT met, skipping config save")
 	}
 
 	// Get command handler for IOC Scanner configuration
@@ -177,7 +183,13 @@ func main() {
 	// Handle graceful shutdown
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-	<-sigChan
+	sig := <-sigChan
+
+	logging.Info().Str("signal", sig.String()).Msg("Shutdown signal received")
+
+	// Send shutdown signal to server
+	shutdownReason := fmt.Sprintf("Graceful shutdown due to signal: %s", sig.String())
+	edrClient.SendShutdownSignal(ctx, shutdownReason)
 
 	logging.Info().Msg("Shutting down agent...")
 

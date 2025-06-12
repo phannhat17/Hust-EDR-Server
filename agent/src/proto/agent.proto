@@ -56,6 +56,8 @@ enum MessageType {
   SERVER_COMMAND = 2;
   COMMAND_RESULT = 3;
   IOC_DATA = 4;        // New message type for IOC data
+  AGENT_RUNNING = 5;   // Agent running signal
+  AGENT_SHUTDOWN = 6;  // Agent shutdown signal
 }
 
 // Unified message for bidirectional streaming
@@ -70,7 +72,9 @@ message CommandMessage {
     StatusRequest status = 5;
     Command command = 6;
     CommandResult result = 7;
-    IOCResponse ioc_data = 8;  // Direct payload for IOC data
+    IOCResponse ioc_data = 8;     // Direct payload for IOC data
+    AgentRunning running = 9;     // Agent running signal
+    AgentShutdown shutdown = 10;  // Agent shutdown signal
   }
 }
 
@@ -78,6 +82,20 @@ message CommandMessage {
 message AgentHello {
   string agent_id = 1;
   int64 timestamp = 2;
+}
+
+// Agent running signal
+message AgentRunning {
+  string agent_id = 1;
+  int64 timestamp = 2;
+  SystemMetrics system_metrics = 3;
+}
+
+// Agent shutdown signal
+message AgentShutdown {
+  string agent_id = 1;
+  int64 timestamp = 2;
+  string reason = 3;  // Optional shutdown reason
 }
 
 // Agent registration request
