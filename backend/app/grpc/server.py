@@ -96,16 +96,14 @@ class EDRServicer(agent_pb2_grpc.EDRServiceServicer):
         agent_id = request.agent_id
         hostname = request.hostname
         
-        # Generate or validate agent ID
+        # Simplified ID assignment logic
         if not agent_id:
+            # Case 1: No agent ID provided → Generate new one
             agent_id = str(uuid.uuid4())
-            logger.info(f"Empty agent ID, generated new unique ID: {agent_id}")
+            logger.info(f"No agent ID provided, generated new ID: {agent_id}")
         elif agent_id in self.storage.agents:
-            existing_agent = self.storage.agents[agent_id]
-            if existing_agent['hostname'] != hostname:
-                old_id = agent_id
-                agent_id = str(uuid.uuid4())
-                logger.info(f"Agent ID {old_id} exists with different hostname. Generated new ID: {agent_id}")
+            # Case 2: Agent ID exists → Re-registration, keep existing ID
+            logger.info(f"Agent {agent_id} registered from {hostname}")
         
         # Store agent information
         agent_data = {
