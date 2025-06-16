@@ -96,11 +96,20 @@ class EDRServicer(agent_pb2_grpc.EDRServiceServicer):
         agent_id = request.agent_id
         hostname = request.hostname
         
-        # Simplified ID assignment logic
+        # Server-controlled ID assignment with collision protection
         if not agent_id:
-            # Case 1: No agent ID provided → Generate new one
-            agent_id = str(uuid.uuid4())
-            logger.info(f"No agent ID provided, generated new ID: {agent_id}")
+            # Case 1: No agent ID provided → Generate new unique one
+            max_attempts = 5
+            for attempt in range(max_attempts):
+                agent_id = str(uuid.uuid4())
+                if agent_id not in self.storage.agents:
+                    logger.info(f"Generated new unique agent ID: {agent_id}")
+                    break
+                else:
+                    logger.warning(f"UUID collision detected (attempt {attempt + 1}): {agent_id}")
+            else:
+                # Virtually impossible scenario - all attempts failed
+                raise Exception(f"Failed to generate unique agent ID after {max_attempts} attempts")
         elif agent_id in self.storage.agents:
             # Case 2: Agent ID exists → Re-registration, keep existing ID
             logger.info(f"Agent {agent_id} registered from {hostname}")
