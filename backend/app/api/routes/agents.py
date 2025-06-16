@@ -28,23 +28,10 @@ def get_agents():
         with open(agents_file, 'r') as f:
             agents_data = json.load(f)
         
-        # Get current time and calculate timeout threshold
-        current_time = int(time.time())
-        timeout_threshold = current_time - config.AGENT_TIMEOUT
-        
-        # Flag to track if we need to update the agents file
-        need_update = False
-        
         # Convert dictionary to list and add 'id' field for frontend compatibility
+        # No need for timeout checking - ping monitor service handles this
         agents_list = []
         for agent_id, agent in agents_data.items():
-            # Check if agent has timed out
-            last_seen = agent.get('last_seen', 0)
-            if last_seen < timeout_threshold and agent.get('status') != 'OFFLINE':
-                agent['status'] = 'OFFLINE'
-                # Update the agent in the data
-                agents_data[agent_id] = agent
-                need_update = True
             
             # Get the OS version and create a simplified version for the table
             full_os_version = agent.get('os_version', 'Unknown')
@@ -87,12 +74,6 @@ def get_agents():
                 'registered_at': agent.get('registration_time', 0) * 1000  # Convert to milliseconds for JS
             }
             agents_list.append(agent_info)
-        
-        # If any agents were updated to OFFLINE, save the changes
-        if need_update:
-            with open(agents_file, 'w') as f:
-                json.dump(agents_data, f, indent=2)
-            logger.info("Updated agents with offline status")
             
         logger.info(f"Found {len(agents_list)} agents")
         return jsonify(agents_list)
@@ -124,20 +105,7 @@ def get_agent(agent_id):
             logger.warning(f"Agent {agent_id} not found")
             return jsonify({"error": "Agent not found"}), 404
         
-        # Check if agent has timed out
-        current_time = int(time.time())
-        timeout_threshold = current_time - config.AGENT_TIMEOUT
-        
-        last_seen = agent.get('last_seen', 0)
-        if last_seen < timeout_threshold and agent.get('status') != 'OFFLINE':
-            agent['status'] = 'OFFLINE'
-            # Update the agent in the data
-            agents_data[agent_id] = agent
-            
-            # Save the updated status
-            with open(agents_file, 'w') as f:
-                json.dump(agents_data, f, indent=2)
-            logger.info(f"Updated agent {agent_id} to offline status")
+        # No need for timeout checking - ping monitor service handles this
         
         # Get the OS version and create a simplified version for the table
         full_os_version = agent.get('os_version', 'Unknown')

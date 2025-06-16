@@ -139,6 +139,15 @@ func main() {
 		log.Printf("DEBUG: Condition NOT met, skipping config save")
 	}
 
+	// Send explicit ONLINE status after startup is complete
+	log.Printf("Sending ONLINE status to server...")
+	metrics := map[string]float64{
+		"cpu_usage":    0.0, // Will be updated by first ping
+		"memory_usage": 0.0,
+		"uptime":       0.0,
+	}
+	edrClient.SendStatusUpdate("ONLINE", metrics)
+
 	// Get command handler for IOC Scanner configuration
 	commandHandler := edrClient.GetCommandHandler()
 
@@ -152,6 +161,9 @@ func main() {
 		defer wg.Done()
 		edrClient.StartCommandStream(ctx)
 	}()
+
+	// Give time for the command stream to establish before sending ONLINE status
+	time.Sleep(2 * time.Second)
 
 	// Request IOC updates on startup with configured delay
 	wg.Add(1)
@@ -187,7 +199,16 @@ func main() {
 
 	logging.Info().Str("signal", sig.String()).Msg("Shutdown signal received")
 
-	// Send shutdown signal to server
+	// Send explicit OFFLINE status to server
+	log.Printf("Sending OFFLINE status to server...")
+	offlineMetrics := map[string]float64{
+		"cpu_usage":    0.0,
+		"memory_usage": 0.0,
+		"uptime":       0.0,
+	}
+	edrClient.SendStatusUpdate("OFFLINE", offlineMetrics)
+
+	// Send shutdown signal to server (legacy)
 	shutdownReason := fmt.Sprintf("Graceful shutdown due to signal: %s", sig.String())
 	edrClient.SendShutdownSignal(ctx, shutdownReason)
 

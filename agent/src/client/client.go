@@ -31,6 +31,12 @@ func init() {
 	rand.Seed(time.Now().UnixNano())
 }
 
+// Channel for sending status updates through the main stream
+type statusUpdate struct {
+	status  string
+	metrics map[string]float64
+}
+
 // EDRClient represents a client for communicating with the EDR server
 type EDRClient struct {
 	serverAddress   string
@@ -42,6 +48,7 @@ type EDRClient struct {
 	dataDir         string
 	useTLS          bool
 	config          *config.Config
+	statusChan      chan statusUpdate // Channel for sending status updates
 }
 
 // NewEDRClient creates a new EDR client (legacy function)
@@ -134,6 +141,7 @@ func NewEDRClientWithConfig(cfg *config.Config) (*EDRClient, error) {
 		dataDir:       cfg.DataDir,
 		useTLS:        cfg.UseTLS,
 		config:        cfg,
+		statusChan:    make(chan statusUpdate, 10), // Buffer size for status updates
 	}
 
 	// Create command handler
@@ -476,23 +484,25 @@ func (c *EDRClient) StartCommandStream(ctx context.Context) {
 				}
 			}()
 			
-			// Start goroutine to send periodic running signals
+			// Start goroutine to send periodic running signals and handle status updates
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
 				
-				// Use the metrics interval from config for running signals
-				log.Printf("Creating running signal ticker with interval of %d minutes", c.config.MetricsInterval)
-				runningTicker := time.NewTicker(c.config.GetMetricsIntervalDuration())
-				defer runningTicker.Stop()
+				// Use the metrics interval from config for ping signals
+				log.Printf("Creating ping signal ticker with interval of %d minutes", c.config.MetricsInterval)
+				pingTicker := time.NewTicker(c.config.GetMetricsIntervalDuration())
+				defer pingTicker.Stop()
 				
-				// Send an initial running signal immediately
+				// Send an initial ping signal immediately
 				sendRunningSignal(c, stream, streamClosed, cancelStream)
 				
 				for {
 					select {
-					case <-runningTicker.C:
+					case <-pingTicker.C:
 						sendRunningSignal(c, stream, streamClosed, cancelStream)
+					case statusUpd := <-c.statusChan:
+						sendStatusUpdate(c, stream, streamClosed, cancelStream, statusUpd.status, statusUpd.metrics)
 					case <-streamCtx.Done():
 						return
 					}
@@ -519,6 +529,46 @@ func (c *EDRClient) StartCommandStream(ctx context.Context) {
 	}
 }
 
+// Helper function to send status updates
+func sendStatusUpdate(c *EDRClient, stream pb.EDRService_CommandStreamClient, streamClosed chan struct{}, cancelStream context.CancelFunc, status string, metrics map[string]float64) {
+	// Check if stream is still active before sending status
+	select {
+	case <-streamClosed:
+		return
+	default:
+		log.Printf("Sending status update: %s", status)
+		
+		// Create status update message
+		statusMsg := &pb.StatusRequest{
+			AgentId:   c.agentID,
+			Timestamp: time.Now().Unix(),
+			Status:    status,
+			SystemMetrics: &pb.SystemMetrics{
+				CpuUsage:    metrics["cpu_usage"] * 100,    // Convert from 0-1 to 0-100 scale
+				MemoryUsage: metrics["memory_usage"] * 100, // Convert from 0-1 to 0-100 scale
+				Uptime:      int64(metrics["uptime"]),
+			},
+		}
+		
+		statusUpdateMsg := &pb.CommandMessage{
+			AgentId:     c.agentID,
+			Timestamp:   time.Now().Unix(),
+			MessageType: pb.MessageType_AGENT_STATUS,
+			Payload: &pb.CommandMessage_Status{
+				Status: statusMsg,
+			},
+		}
+		
+		if err := stream.Send(statusUpdateMsg); err != nil {
+			log.Printf("Failed to send status update: %v", err)
+			cancelStream() // Cancel context to signal all goroutines to stop
+			return
+		}
+		
+		log.Printf("Successfully sent status update: %s", status)
+	}
+}
+
 // Helper function to send running signals
 func sendRunningSignal(c *EDRClient, stream pb.EDRService_CommandStreamClient, streamClosed chan struct{}, cancelStream context.CancelFunc) {
 	// Check if stream is still active before sending signal
@@ -533,8 +583,8 @@ func sendRunningSignal(c *EDRClient, stream pb.EDRService_CommandStreamClient, s
 			"uptime":       float64(getUptime()),
 		}
 		
-		// Log that we're sending running signal with proper percentage formatting
-		log.Printf("Sending running signal with metrics: CPU: %.2f%%, Memory: %.2f%%, Uptime: %.0fs", 
+		// Log that we're sending ping signal with proper percentage formatting
+		log.Printf("Sending ping signal with metrics: CPU: %.2f%%, Memory: %.2f%%, Uptime: %.0fs", 
 			metrics["cpu_usage"]*100, metrics["memory_usage"]*100, metrics["uptime"])
 		
 		// Create running signal message
@@ -702,4 +752,14 @@ type AgentInfo struct {
 	AgentVersion  string
 	RegisteredAt  time.Time
 	ServerMessage string
+}
+
+// SendStatusUpdate sends a status update through the main command stream
+func (c *EDRClient) SendStatusUpdate(status string, metrics map[string]float64) {
+	select {
+	case c.statusChan <- statusUpdate{status: status, metrics: metrics}:
+		log.Printf("Queued status update: %s", status)
+	default:
+		log.Printf("Status update channel full, dropping status update: %s", status)
+	}
 } 

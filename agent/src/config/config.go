@@ -32,7 +32,7 @@ const (
 	
 	// Timing defaults (in minutes)
 	DefaultScanInterval    = 5
-	DefaultMetricsInterval = 5  // Changed from 30 to 5 minutes to ensure agent stays online
+	DefaultMetricsInterval = 10  // 10 minutes ping interval for new ping-based monitoring
 	
 	// Connection defaults (in seconds)
 	DefaultConnectionTimeout    = 30

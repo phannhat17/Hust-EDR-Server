@@ -45,12 +45,17 @@ def create_app():
     
     # Initialize ElastAlert client
     from app.grpc.server import EDRServicer, start_grpc_server
+    from app.services.ping_monitor import ping_monitor
     
     # Start the gRPC server in a separate thread
     global grpc_server, grpc_servicer
     grpc_port = config.GRPC_PORT
     grpc_server, grpc_servicer = start_grpc_server(grpc_port)
     logger.info(f"gRPC server started on port {grpc_port}")
+    
+    # Start ping monitor service
+    ping_monitor.start()
+    logger.info("Agent ping monitor service started")
     
     elastalert_client = ElastAlertClient(grpc_servicer)
     app.config['elastalert_client'] = elastalert_client
@@ -135,6 +140,11 @@ def create_app():
 def shutdown_background_threads():
     """Shutdown background threads gracefully."""
     global grpc_server, grpc_servicer
+    
+    # Stop ping monitor service
+    from app.services.ping_monitor import ping_monitor
+    ping_monitor.stop()
+    logger.info("Agent ping monitor service stopped")
     
     if grpc_server:
         logger.info("Shutting down gRPC server...")
