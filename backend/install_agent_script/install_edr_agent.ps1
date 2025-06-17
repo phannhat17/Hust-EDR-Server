@@ -290,7 +290,6 @@ Invoke-FileDownload -Url $CERT_URL -OutputFile $CA_CERT_FILE -Description "CA ce
 Write-Step "Creating configuration file..."
 $caCertPath = $CA_CERT_FILE.Replace('\', '/')
 $hostsFilePath = "C:/Windows/System32/drivers/etc/hosts"
-$logFilePath = ($LOGS_DIR + "/edr-agent.log").Replace('\', '/')
 $dataDirPath = $DATA_DIR.Replace('\', '/')
 
 $configContent = @"
@@ -301,7 +300,7 @@ ca_cert_path: "$caCertPath"
 insecure_skip_verify: false
 agent_id: ""
 agent_version: "1.0.0"
-log_file: "$logFilePath"
+log_file: ""
 data_dir: "$dataDirPath"
 log_level: "info"
 log_format: "console"
@@ -350,21 +349,6 @@ if (-not (Install-ServiceWithNSSM)) {
 
 # Set file permissions
 Set-FilePermissions | Out-Null
-
-# Test agent configuration
-Write-Step "Testing agent configuration..."
-try {
-    & $AGENT_BINARY --config $CONFIG_FILE --help 2>&1 | Out-Null
-    if ($LASTEXITCODE -eq 0) {
-        Write-Success "Agent configuration test passed"
-    }
-    else {
-        Write-Warning "Agent configuration test failed, but installation will continue"
-    }
-}
-catch {
-    Write-Warning "Could not test agent configuration: $_"
-}
 
 # Start the service
 Start-ServiceSafely | Out-Null

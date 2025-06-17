@@ -51,6 +51,9 @@ func main() {
 		log.Fatalf("Failed to load configuration: %v", err)
 	}
 	
+	// DEBUG: Print loaded config values
+	log.Printf("DEBUG: After loading config - cfg.AgentID='%s'", cfg.AgentID)
+	
 	// Ensure agent version is set
 	if cfg.AgentVersion == "" {
 		cfg.AgentVersion = config.DefaultAgentVersion
@@ -90,6 +93,9 @@ func main() {
 		log.Fatalf("Failed to apply configuration flags: %v", err)
 	}
 
+	// DEBUG: Print config values after applying flags
+	log.Printf("DEBUG: After applying flags - cfg.AgentID='%s'", cfg.AgentID)
+
 	// Setup data directory
 	if err := os.MkdirAll(cfg.DataDir, 0755); err != nil {
 		log.Fatalf("Failed to create data directory: %v", err)
@@ -116,6 +122,9 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	// Store original agent ID before registration (to check if we need to save config)
+	originalAgentID := cfg.AgentID
+
 	// Register with server
 	agentInfo, err := edrClient.Register(ctx)
 	if err != nil {
@@ -125,9 +134,9 @@ func main() {
 	log.Printf("Registered with server as agent ID: %s", agentInfo.AgentID)
 	
 	// Always save agent ID if it's empty or different from server response
-	log.Printf("DEBUG: cfg.AgentID='%s', agentInfo.AgentID='%s'", cfg.AgentID, agentInfo.AgentID)
+	log.Printf("DEBUG: originalAgentID='%s', agentInfo.AgentID='%s'", originalAgentID, agentInfo.AgentID)
 	
-	if cfg.AgentID == "" || cfg.AgentID != agentInfo.AgentID {
+	if originalAgentID == "" || originalAgentID != agentInfo.AgentID {
 		log.Printf("DEBUG: Condition met, saving config...")
 		cfg.AgentID = agentInfo.AgentID
 		if err := cfg.SaveConfig(*configFile); err != nil {
