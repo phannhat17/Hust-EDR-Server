@@ -1,6 +1,6 @@
 param(
-    [string]$gRPCHost = "192.168.133.145:50051",
-    [string]$ServerHost = "192.168.133.145:5000"
+    [string]$gRPCHost = "localhost:50051",
+    [string]$ServerHost = "localhost:5000"
 )
 
 #==============================================================================
