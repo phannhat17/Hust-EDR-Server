@@ -113,7 +113,7 @@ def get_edr_stack_script():
 def get_edr_install_oneliner():
     """Generate a one-liner PowerShell command to install the complete EDR stack."""
     host = request.host
-    oneliner = f'''powershell -Command "Invoke-WebRequest -Uri "http://192.168.133.145:5000/api/install/edr-stack-script" -UseBasicParsing | Invoke-Expression"
+    oneliner = f'''powershell -Command "Invoke-WebRequest -Uri 'http://192.168.133.145:5000/api/install/edr-stack-script' -UseBasicParsing | Invoke-Expression"
 '''
     response = make_response(oneliner)
     response.headers['Content-Type'] = 'text/plain'
