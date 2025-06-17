@@ -10,6 +10,12 @@ SCRIPT_DIR = config.SCRIPT_DIR
 CERT_DIR = config.CERT_DIR
 
 # Certificate routes
+@install_bp.route('/ca-cert', methods=['GET'])
+def get_ca_cert():
+    """Serve the CA certificate file."""
+    cert_path = os.path.join(CERT_DIR, 'ca.crt')
+    return send_file(cert_path, mimetype='application/x-x509-ca-cert')
+
 @install_bp.route('/kibana-cert', methods=['GET'])
 def get_kibana_cert():
     """Serve the Kibana certificate file."""
@@ -61,9 +67,8 @@ def get_winlogbeat_script_with_host():
 def get_edr_agent_script_with_params():
     """Serve the EDR agent installation script with the gRPC host and port parameters embedded."""
     # Get host and port from query parameters
-    host = request.args.get('host', 'localhost')
-    port = request.args.get('port', '50051')
-    grpc_host = f"{host}:{port}"
+    grpc_host = request.args.get('grpc_host', 'localhost:50051')
+    server_host = request.args.get('server_host', 'localhost:5000')
     
     script_path = os.path.join(SCRIPT_DIR, 'install_edr_agent.ps1')
     with open(script_path, 'r') as f:
@@ -72,8 +77,8 @@ def get_edr_agent_script_with_params():
     # Modify the script to include the gRPC host parameter
     # Find and replace only the default value while preserving the variable name
     modified_script = script_content.replace(
-        'param(\n    [string]$gRPCHost = "localhost:50051"',
-        f'param(\n    [string]$gRPCHost = "{grpc_host}"'
+        'param(\n    [string]$gRPCHost = "localhost:50051",\n    [string]$ServerHost = "localhost:5000"',
+        f'param(\n    [string]$gRPCHost = "{grpc_host}",\n    [string]$ServerHost = "{server_host}"'
     )
     
     # Return as plain text
@@ -108,7 +113,8 @@ def get_edr_stack_script():
 def get_edr_install_oneliner():
     """Generate a one-liner PowerShell command to install the complete EDR stack."""
     host = request.host
-    oneliner = f'powershell -Command "[System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; iex ((New-Object System.Net.WebClient).DownloadString(\'http://{host}/api/install/edr-stack-script\'))"'
+    oneliner = f'''powershell -Command "Invoke-WebRequest -Uri 'http://192.168.133.145:5000/api/install/edr-stack-script' -UseBasicParsing | Invoke-Expression"
+'''
     response = make_response(oneliner)
     response.headers['Content-Type'] = 'text/plain'
     return response

@@ -82,7 +82,7 @@ Override any setting using command-line flags:
 | Option | Type | Default | Range | Description |
 |--------|------|---------|-------|-------------|
 | `scan_interval` | int | `5` | 1-1440 | IOC scan interval |
-| `metrics_interval` | int | `30` | 1-1440 | System metrics reporting interval |
+| `metrics_interval` | int | `5` | 1-1440 | System metrics reporting interval (must be < 10 minutes for agent to stay online) |
 
 ### Connection Configuration (seconds)
 
@@ -104,7 +104,6 @@ Override any setting using command-line flags:
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `sysmon_log_path` | string | `C:\Windows\System32\winevt\Logs\Microsoft-Windows-Sysmon%4Operational.evtx` | Sysmon log file path |
 | `hosts_file_path` | string | `C:\Windows\System32\drivers\etc\hosts` | Windows hosts file path |
 | `blocked_ip_redirect` | string | `127.0.0.1` | IP address for blocked domains |
 
@@ -219,6 +218,7 @@ All previously hardcoded values have been moved to the configuration system:
 3. **Validate configuration** early in application startup
 4. **Document custom settings** in your deployment
 5. **Use duration helpers** instead of manual time calculations
+6. **Keep metrics_interval < 10 minutes** to ensure agents stay online (server timeout is 10 minutes)
 6. **Keep sensitive data** out of configuration files when possible
 
 ## Troubleshooting

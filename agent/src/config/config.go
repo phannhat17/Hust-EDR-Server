@@ -22,13 +22,17 @@ const (
 	DefaultDataDir      = "data"
 	DefaultConfigFile   = "config.yaml"
 	
+	// TLS/Certificate defaults
+	DefaultCACertPath        = ""    // Path to CA certificate for server verification
+	DefaultInsecureSkipVerify = false // Whether to skip certificate verification
+	
 	// Logging defaults
 	DefaultLogLevel  = "info"
 	DefaultLogFormat = "console"
 	
 	// Timing defaults (in minutes)
 	DefaultScanInterval    = 5
-	DefaultMetricsInterval = 30
+	DefaultMetricsInterval = 10  // 10 minutes ping interval for new ping-based monitoring
 	
 	// Connection defaults (in seconds)
 	DefaultConnectionTimeout    = 30
@@ -41,7 +45,6 @@ const (
 	DefaultCPUSampleDuration = 500 // milliseconds
 	
 	// Windows-specific defaults
-	DefaultSysmonLogPath = "C:\\Windows\\System32\\winevt\\Logs\\Microsoft-Windows-Sysmon%4Operational.evtx"
 	DefaultHostsFilePath = "C:\\Windows\\System32\\drivers\\etc\\hosts"
 	DefaultBlockedIPRedirect = "127.0.0.1"
 	
@@ -59,6 +62,10 @@ type Config struct {
 	// Server configuration
 	ServerAddress string `yaml:"server_address" json:"server_address"`
 	UseTLS        bool   `yaml:"use_tls" json:"use_tls"`
+	
+	// TLS/Certificate configuration
+	CACertPath        string `yaml:"ca_cert_path" json:"ca_cert_path"`               // Path to CA certificate for server verification
+	InsecureSkipVerify bool   `yaml:"insecure_skip_verify" json:"insecure_skip_verify"` // Skip certificate verification (not recommended for production)
 	
 	// Agent identification
 	AgentID      string `yaml:"agent_id" json:"agent_id"`
@@ -87,7 +94,6 @@ type Config struct {
 	CPUSampleDuration int `yaml:"cpu_sample_duration" json:"cpu_sample_duration"` // milliseconds
 	
 	// Windows-specific configuration
-	SysmonLogPath     string `yaml:"sysmon_log_path" json:"sysmon_log_path"`
 	HostsFilePath     string `yaml:"hosts_file_path" json:"hosts_file_path"`
 	BlockedIPRedirect string `yaml:"blocked_ip_redirect" json:"blocked_ip_redirect"`
 	
@@ -111,6 +117,8 @@ func NewDefaultConfig() *Config {
 	return &Config{
 		ServerAddress:       DefaultServerAddress,
 		UseTLS:             DefaultUseTLS,
+		CACertPath:         DefaultCACertPath,
+		InsecureSkipVerify: DefaultInsecureSkipVerify,
 		AgentVersion:       DefaultAgentVersion,
 		DataDir:            DefaultDataDir,
 		LogLevel:           DefaultLogLevel,
@@ -123,7 +131,6 @@ func NewDefaultConfig() *Config {
 		IOCUpdateDelay:     DefaultIOCUpdateDelay,
 		ShutdownTimeout:    DefaultShutdownTimeout,
 		CPUSampleDuration:  DefaultCPUSampleDuration,
-		SysmonLogPath:      DefaultSysmonLogPath,
 		HostsFilePath:      DefaultHostsFilePath,
 		BlockedIPRedirect:  DefaultBlockedIPRedirect,
 		ConfigFile:         DefaultConfigFile,
@@ -293,14 +300,6 @@ func (c *Config) Validate() error {
 	}
 	
 	// Validate file paths
-	if c.SysmonLogPath == "" {
-		errors = append(errors, ValidationError{
-			Field:   "sysmon_log_path",
-			Value:   c.SysmonLogPath,
-			Message: "sysmon log path cannot be empty",
-		})
-	}
-	
 	if c.HostsFilePath == "" {
 		errors = append(errors, ValidationError{
 			Field:   "hosts_file_path",
@@ -316,6 +315,17 @@ func (c *Config) Validate() error {
 			Value:   c.BlockedIPRedirect,
 			Message: "must be a valid IP address",
 		})
+	}
+	
+	// Validate CA certificate path if TLS is enabled and path is specified
+	if c.UseTLS && c.CACertPath != "" {
+		if _, err := os.Stat(c.CACertPath); os.IsNotExist(err) {
+			errors = append(errors, ValidationError{
+				Field:   "ca_cert_path",
+				Value:   c.CACertPath,
+				Message: "CA certificate file does not exist",
+			})
+		}
 	}
 	
 	// Return first error if any
@@ -381,6 +391,10 @@ func (c *Config) generateYAMLWithComments() string {
 server_address: "%s"  # EDR server address (host:port)
 use_tls: %t                      # Enable TLS encryption for server communication
 
+# TLS/Certificate Configuration (only applies when use_tls is true)
+ca_cert_path: "%s"               # Path to CA certificate for server verification (leave empty to use system CA)
+insecure_skip_verify: %t          # Skip certificate verification (not recommended for production)
+
 # Agent Identification
 agent_id: "%s"                       # Agent ID (leave empty for auto-generation)
 agent_version: "%s"            # Agent version
@@ -408,12 +422,19 @@ shutdown_timeout: %d              # Shutdown timeout (milliseconds)
 cpu_sample_duration: %d           # CPU sampling duration (milliseconds)
 
 # Windows-specific Configuration
-sysmon_log_path: "%s"
 hosts_file_path: "%s"
 blocked_ip_redirect: "%s"   # IP address to redirect blocked domains to
+
+# Certificate Verification Notes:
+# - If ca_cert_path is specified, the agent will use this CA certificate to verify the server
+# - If ca_cert_path is empty, the agent will use the system's default CA certificates
+# - Setting insecure_skip_verify to true bypasses all certificate verification (not recommended)
+# - For production environments, always use proper CA certificates and keep insecure_skip_verify false
 `,
 		c.ServerAddress,
 		c.UseTLS,
+		c.CACertPath,
+		c.InsecureSkipVerify,
 		c.AgentID,
 		c.AgentVersion,
 		c.LogFile,
@@ -428,7 +449,6 @@ blocked_ip_redirect: "%s"   # IP address to redirect blocked domains to
 		c.IOCUpdateDelay,
 		c.ShutdownTimeout,
 		c.CPUSampleDuration,
-		c.SysmonLogPath,
 		c.HostsFilePath,
 		c.BlockedIPRedirect,
 	)

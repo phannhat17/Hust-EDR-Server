@@ -6,6 +6,10 @@
 server_address: "localhost:50051"  # EDR server address (host:port)
 use_tls: true                      # Enable TLS encryption for server communication
 
+# TLS/Certificate Configuration (only applies when use_tls is true)
+ca_cert_path: ""                   # Path to CA certificate for server verification (leave empty to use system CA)
+insecure_skip_verify: false        # Skip certificate verification (not recommended for production)
+
 # Agent Identification
 agent_id: ""                       # Agent ID (leave empty for auto-generation)
 agent_version: "1.0.0"            # Agent version
@@ -20,7 +24,7 @@ log_format: "console"              # Log format: console, json
 
 # Timing Configuration (in minutes)
 scan_interval: 5                   # IOC scan interval
-metrics_interval: 30               # System metrics reporting interval
+metrics_interval: 5                # System metrics reporting interval (must be less than server timeout of 10 minutes)
 
 # Connection Configuration (in seconds)
 connection_timeout: 30             # Connection timeout
@@ -33,7 +37,6 @@ shutdown_timeout: 500              # Shutdown timeout (milliseconds)
 cpu_sample_duration: 500           # CPU sampling duration (milliseconds)
 
 # Windows-specific Configuration
-sysmon_log_path: "C:\\Windows\\System32\\winevt\\Logs\\Microsoft-Windows-Sysmon%4Operational.evtx"
 hosts_file_path: "C:\\Windows\\System32\\drivers\\etc\\hosts"
 blocked_ip_redirect: "127.0.0.1"   # IP address to redirect blocked domains to
 
@@ -43,6 +46,13 @@ blocked_ip_redirect: "127.0.0.1"   # IP address to redirect blocked domains to
 # - TLS is recommended for production environments
 # - Log files will be created automatically if they don't exist
 # - Data directory will be created automatically if it doesn't exist
+
+# Certificate Verification Notes:
+# - If ca_cert_path is specified, the agent will use this CA certificate to verify the server
+# - If ca_cert_path is empty, the agent will use the system's default CA certificates
+# - Setting insecure_skip_verify to true bypasses all certificate verification (not recommended)
+# - For production environments, always use proper CA certificates and keep insecure_skip_verify false
+# - Copy the server's CA certificate (ca.crt) to the agent machine and specify its path in ca_cert_path
 
 # Configuration Validation Limits:
 # - scan_interval: 1-1440 minutes (1 minute to 24 hours)

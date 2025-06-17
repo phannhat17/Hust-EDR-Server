@@ -96,16 +96,23 @@ class EDRServicer(agent_pb2_grpc.EDRServiceServicer):
         agent_id = request.agent_id
         hostname = request.hostname
         
-        # Generate or validate agent ID
+        # Server-controlled ID assignment with collision protection
         if not agent_id:
-            agent_id = str(uuid.uuid4())
-            logger.info(f"Empty agent ID, generated new unique ID: {agent_id}")
-        elif agent_id in self.storage.agents:
-            existing_agent = self.storage.agents[agent_id]
-            if existing_agent['hostname'] != hostname:
-                old_id = agent_id
+            # Case 1: No agent ID provided → Generate new unique one
+            max_attempts = 5
+            for attempt in range(max_attempts):
                 agent_id = str(uuid.uuid4())
-                logger.info(f"Agent ID {old_id} exists with different hostname. Generated new ID: {agent_id}")
+                if agent_id not in self.storage.agents:
+                    logger.info(f"Generated new unique agent ID: {agent_id}")
+                    break
+                else:
+                    logger.warning(f"UUID collision detected (attempt {attempt + 1}): {agent_id}")
+            else:
+                # Virtually impossible scenario - all attempts failed
+                raise Exception(f"Failed to generate unique agent ID after {max_attempts} attempts")
+        elif agent_id in self.storage.agents:
+            # Case 2: Agent ID exists → Re-registration, keep existing ID
+            logger.info(f"Agent {agent_id} registered from {hostname}")
         
         # Store agent information
         agent_data = {
@@ -139,6 +146,7 @@ class EDRServicer(agent_pb2_grpc.EDRServiceServicer):
         timestamp = request.timestamp
         status = request.status
         
+        print(f"[DEBUG] UpdateStatus called: agent={agent_id}, status={status}")
         logger.info(f"Status update from agent {agent_id}: {status}")
         
         # Check if agent exists
@@ -261,11 +269,10 @@ class EDRServicer(agent_pb2_grpc.EDRServiceServicer):
                         self.active_streams[agent_id] = context
                         conn_logger.debug(f"Registered bidirectional command stream for agent {agent_id}")
                     
-                    # Update agent status to ONLINE when stream is established
-                    agent['status'] = 'ONLINE'
+                    # Don't auto-set ONLINE - wait for explicit status update
                     agent['last_seen'] = int(time.time())
                     self.storage.save_agent(agent_id, agent)
-                    logger.info(f"Agent {agent_id} connected and set to ONLINE status")
+                    logger.info(f"Agent {agent_id} connected - waiting for explicit ONLINE status")
                     
                     # Initial IOC check
                     self._check_ioc_update_needed(agent, agent_id)
@@ -298,13 +305,7 @@ class EDRServicer(agent_pb2_grpc.EDRServiceServicer):
                 current_time = int(time.time())
                 check_counter += 1
                 
-                # Update agent status periodically
-                if current_time - last_status_update >= status_update_interval:
-                    agent['last_seen'] = current_time
-                    agent['status'] = 'ONLINE'
-                    self.storage.save_agent(agent_id, agent)
-                    last_status_update = current_time
-                    debug_logger.info(f"Updated agent {agent_id} status to ONLINE, next update in {status_update_interval//60} minutes")
+                # No need for periodic status updates - ping monitor handles timeouts
                 
                 # Periodic IOC check
                 if check_counter % 60 == 0:
@@ -436,20 +437,20 @@ class EDRServicer(agent_pb2_grpc.EDRServiceServicer):
         """Process incoming messages from the agent in a separate thread."""
         try:
             for message in request_iterator:
+                print(f"[DEBUG] Received message type: {message.message_type}")
                 if message.message_type == agent_pb2.MessageType.AGENT_STATUS:
-                    # Handle status update
+                    # Handle explicit status update (ONLINE/OFFLINE)
+                    print(f"[DEBUG] Processing AGENT_STATUS message from {agent_id}")
                     status_req = message.status
                     status = status_req.status
                     
-                    logger.info(f"Status update from agent {agent_id}: {status}")
+                    print(f"[DEBUG] Status extracted: {status}")
+                    logger.info(f"Explicit status update from agent {agent_id}: {status}")
                     
                     # Check if agent exists
                     agent = self.storage.get_agent(agent_id)
                     if agent:
-                        # Update agent status - ensure it's changed from REGISTERED to ONLINE
-                        if agent.get('status') == 'REGISTERED' and status == 'ONLINE':
-                            logger.info(f"Agent {agent_id} status changing from REGISTERED to ONLINE")
-                        
+                        # Update agent status
                         agent.update({
                             'last_seen': status_req.timestamp,
                             'status': status
@@ -464,9 +465,64 @@ class EDRServicer(agent_pb2_grpc.EDRServiceServicer):
                             })
                         
                         self.storage.save_agent(agent_id, agent)
+                        # Force save for status updates to ensure immediate persistence
+                        self.storage.force_save()
+                        print(f"[DEBUG] Successfully saved agent {agent_id} with status {status}")
                         logger.info(f"Updated agent {agent_id} status to {status}")
                     else:
+                        print(f"[DEBUG] Unknown agent {agent_id} for status update")
                         logger.warning(f"Received status update for unknown agent {agent_id}")
+                
+                elif message.message_type == agent_pb2.MessageType.AGENT_RUNNING:
+                    # Handle ping signal - only update last_seen and metrics, NOT status
+                    running_signal = message.running
+                    if running_signal:
+                        logger.debug(f"Ping signal from agent {agent_id}")
+                        
+                        # Update agent last_seen and metrics (but not status)
+                        agent = self.storage.get_agent(agent_id)
+                        if agent:
+                            agent.update({
+                                'last_seen': running_signal.timestamp
+                                # Do NOT update status here - let ping monitor handle timeouts
+                            })
+                            
+                            # Update metrics if provided
+                            if running_signal.system_metrics:
+                                agent.update({
+                                    'cpu_usage': running_signal.system_metrics.cpu_usage,
+                                    'memory_usage': running_signal.system_metrics.memory_usage,
+                                    'uptime': running_signal.system_metrics.uptime
+                                })
+                            
+                            self.storage.save_agent(agent_id, agent)
+                            debug_logger.debug(f"Updated last_seen for agent {agent_id} from ping")
+                        else:
+                            logger.warning(f"Received ping signal for unknown agent {agent_id}")
+                    else:
+                        logger.warning(f"Received AGENT_RUNNING message with no running payload from agent {agent_id}")
+                
+                elif message.message_type == agent_pb2.MessageType.AGENT_SHUTDOWN:
+                    # Handle explicit shutdown signal
+                    shutdown_signal = message.shutdown
+                    if shutdown_signal:
+                        logger.info(f"Shutdown signal from agent {agent_id}: {shutdown_signal.reason}")
+                        
+                        # Set agent to OFFLINE immediately
+                        agent = self.storage.get_agent(agent_id)
+                        if agent:
+                            agent.update({
+                                'last_seen': shutdown_signal.timestamp,
+                                'status': 'OFFLINE'
+                            })
+                            self.storage.save_agent(agent_id, agent)
+                            # Force save for shutdown status to ensure immediate persistence
+                            self.storage.force_save()
+                            logger.info(f"Set agent {agent_id} to OFFLINE due to shutdown signal")
+                        else:
+                            logger.warning(f"Received shutdown signal for unknown agent {agent_id}")
+                    else:
+                        logger.warning(f"Received AGENT_SHUTDOWN message with no shutdown payload from agent {agent_id}")
                 
                 elif message.message_type == agent_pb2.MessageType.COMMAND_RESULT:
                     # Handle command result

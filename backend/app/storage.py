@@ -98,12 +98,15 @@ class FileStorage:
             
             # Only save if dirty and either forced or enough time has passed
             if self.dirty_agents and (force or elapsed >= self.save_interval):
+                print(f"[DEBUG] Actually saving to file (elapsed: {elapsed}s)")
                 success = self._save_json(self.agents, self.agents_file)
                 if success:
                     self.dirty_agents = False
                     self.last_save_time = current_time
                     debug_logger.debug(f"Saved {len(self.agents)} agents to storage (elapsed: {int(elapsed)}s)")
                 return success
+            else:
+                print(f"[DEBUG] Skipping save - elapsed: {elapsed}s, dirty: {self.dirty_agents}, force: {force}")
             return True  # No save needed
     
     def save_ioc_match(self, match_id, match_data):
@@ -130,14 +133,22 @@ class FileStorage:
         with self.agent_mutex:
             return self.agents.get(agent_id)
     
+    def get_all_agents(self):
+        """Get all agents."""
+        with self.agent_mutex:
+            return self.agents.copy()
+    
     def save_agent(self, agent_id, agent_data):
         """Save agent data with optimized writes."""
         with self.agent_mutex:
             self.agents[agent_id] = agent_data
             self.dirty_agents = True
+            print(f"[DEBUG] save_agent called for {agent_id}, status: {agent_data.get('status')}")
             
             # Perform actual save based on time throttling
-            return self._save_agents(force=False)
+            result = self._save_agents(force=False)
+            print(f"[DEBUG] _save_agents returned: {result}")
+            return result
     
     def force_save(self):
         """Force save any pending changes."""

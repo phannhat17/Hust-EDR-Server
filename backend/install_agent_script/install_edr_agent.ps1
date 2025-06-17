@@ -1,352 +1,363 @@
-# Install EDR Agent Script for Windows
-# This script downloads and installs the EDR agent as a Windows service
-# Must be run with administrator privileges
-
 param(
-    [string]$gRPCHost = "localhost:50051"
+    [string]$gRPCHost = "localhost:50051",
+    [string]$ServerHost = "localhost:5000"
 )
 
-# Format gRPC host - ensure it has protocol and port
-if ($gRPCHost -notlike "*:*") {
-    $gRPCHost = "$gRPCHost:50051"
+#==============================================================================
+# HUST EDR Agent Installation Script
+# Description: Installs the HUST EDR Agent as a Windows service
+# Requirements: Administrator privileges
+# Version: 2.0
+#==============================================================================
+
+# Script Configuration
+$SCRIPT_NAME = "HUST EDR Agent Installer"
+$SCRIPT_VERSION = "2.0"
+$SERVICE_NAME = "HUST-EDR-Agent"
+$SERVICE_DISPLAY_NAME = "HUST EDR Agent"
+$SERVICE_DESCRIPTION = "HUST Endpoint Detection and Response Agent"
+
+# Installation Paths
+$INSTALL_DIR = "C:\Program Files\HUST-EDR-Agent"
+$DATA_DIR = "C:\ProgramData\HUST-EDR-Agent"
+$LOGS_DIR = "$INSTALL_DIR\logs"
+$TEMP_DIR = "$env:TEMP\HUST-EDR-Install"
+
+# File Paths
+$CONFIG_FILE = "$DATA_DIR\config.yaml"
+$AGENT_BINARY = "$INSTALL_DIR\edr-agent.exe"
+$CA_CERT_FILE = "$DATA_DIR\ca.crt"
+$NSSM_ZIP = "$TEMP_DIR\nssm.zip"
+$NSSM_DIR = "$TEMP_DIR\nssm"
+$NSSM_EXE = "$NSSM_DIR\nssm-2.24\win64\nssm.exe"
+
+# Download URLs
+$AGENT_URL = "http://$ServerHost/api/install/edr-agent-binary"
+$CERT_URL = "http://$ServerHost/api/install/ca-cert"
+$NSSM_URL = "https://nssm.cc/release/nssm-2.24.zip"
+
+#==============================================================================
+# Common Functions
+#==============================================================================
+
+function Write-Header {
+    param([string]$Title, [string]$Color = "Green")
+    Write-Host "`n=== $Title ===" -ForegroundColor $Color
 }
 
-# Set download URL and installation paths
-$edrAgentUrl = "http://192.168.133.145:5000/api/install/edr-agent-binary"
-$edrDir = "C:\Program Files\Hust-EDR-Agent"
-$edrExe = "$edrDir\edr-agent.exe"
-$serviceName = "HustEDRAgent"
-
-# NSSM settings
-$nssmUrl = "https://nssm.cc/release/nssm-2.24.zip"
-$nssmZip = "$env:TEMP\nssm.zip"
-$nssmDir = "$edrDir\nssm"
-$nssmExe = "$nssmDir\nssm-2.24\win64\nssm.exe"
-
-# Check for administrator privileges
-$currentPrincipal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
-if (-not $currentPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-    Write-Host "This script requires administrator privileges. Please run as administrator." -ForegroundColor Red
-    exit 1
+function Write-Step {
+    param([string]$Message)
+    Write-Host $Message -ForegroundColor Yellow
 }
 
-# Create EDR directory if it doesn't exist
-if (!(Test-Path $edrDir)) {
-    Write-Host "Creating EDR directory: $edrDir"
-    New-Item -ItemType Directory -Path $edrDir -Force | Out-Null
+function Write-Success {
+    param([string]$Message)
+    Write-Host $Message -ForegroundColor Green
 }
 
-# Function for faster downloads using .NET WebClient
-function Download-File {
-    param (
+function Write-Warning {
+    param([string]$Message)
+    Write-Host "WARNING: $Message" -ForegroundColor Yellow
+}
+
+function Write-Error {
+    param([string]$Message)
+    Write-Host "ERROR: $Message" -ForegroundColor Red
+}
+
+function Test-Administrator {
+    $currentPrincipal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
+    return $currentPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
+function Initialize-Environment {
+    Write-Step "Initializing environment..."
+    
+    # Set security protocol
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+    
+    # Create directories
+    $directories = @($INSTALL_DIR, $DATA_DIR, $LOGS_DIR, $TEMP_DIR)
+    foreach ($dir in $directories) {
+        if (!(Test-Path $dir)) {
+            New-Item -ItemType Directory -Path $dir -Force | Out-Null
+        }
+    }
+    
+    Write-Success "Environment initialized successfully"
+}
+
+function Invoke-FileDownload {
+    param(
         [string]$Url,
-        [string]$OutputFile
+        [string]$OutputFile,
+        [string]$Description = "file"
     )
     
-    Write-Host "Downloading $Url to $OutputFile..."
-    $webClient = New-Object System.Net.WebClient
-    $webClient.DownloadFile($Url, $OutputFile)
-}
-
-# Create logs and data directories
-$dataDir = "$env:PROGRAMDATA\HustEDRAgent"
-if (!(Test-Path $dataDir)) {
-    Write-Host "Creating data directory: $dataDir"
-    New-Item -ItemType Directory -Path $dataDir -Force | Out-Null
-}
-$logDir = "$dataDir\logs"
-if (!(Test-Path $logDir)) {
-    Write-Host "Creating logs directory: $logDir"
-    New-Item -ItemType Directory -Path $logDir -Force | Out-Null
-}
-
-# Delete and stop the service if it already exists
-if (Get-Service $serviceName -ErrorAction SilentlyContinue) {
-    Write-Host "Stopping existing EDR Agent service..."
-    Stop-Service -Name $serviceName -Force -ErrorAction SilentlyContinue
-    Start-Sleep -s 2
+    Write-Step "Downloading $Description from $Url..."
     
-    # Force kill any lingering processes
-    $processName = "edr-agent"
-    Get-Process | Where-Object {$_.ProcessName -eq $processName} | Stop-Process -Force -ErrorAction SilentlyContinue
-    
-    Write-Host "Removing existing EDR Agent service..."
-    & sc.exe delete $serviceName
-    Start-Sleep -s 2
-}
-
-# Make sure registry keys are cleaned up
-$registryPaths = @(
-    "HKLM:\SYSTEM\CurrentControlSet\Services\$serviceName",
-    "HKLM:\SYSTEM\CurrentControlSet\Services\EventLog\Application\$serviceName"
-)
-
-foreach ($path in $registryPaths) {
-    if (Test-Path $path) {
-        Write-Host "Removing registry key: $path"
-        Remove-Item -Path $path -Recurse -Force -ErrorAction SilentlyContinue
+    try {
+        # Primary method: WebClient (fastest)
+        $webClient = New-Object System.Net.WebClient
+        $webClient.DownloadFile($Url, $OutputFile)
+        Write-Success "$Description downloaded successfully"
+        return $true
     }
-}
-
-# Download EDR Agent
-Write-Host "Downloading EDR Agent..."
-[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-try {
-    # Use faster WebClient instead of Invoke-WebRequest
-    Download-File -Url $edrAgentUrl -OutputFile $edrExe
-} catch {
-    Write-Host "WebClient download failed, trying alternative method..." -ForegroundColor Yellow
-    
-    # Fallback to BitsTransfer if available
-    if (Get-Command Start-BitsTransfer -ErrorAction SilentlyContinue) {
-        Write-Host "Using BITS Transfer..."
-        Start-BitsTransfer -Source $edrAgentUrl -Destination $edrExe
-    } else {
-        # Last resort, use Invoke-WebRequest
-        Write-Host "Using Invoke-WebRequest..."
-        Invoke-WebRequest -Uri $edrAgentUrl -OutFile $edrExe
-    }
-}
-
-# Test the executable first to make sure it works
-Write-Host "Testing EDR Agent executable..."
-$agentIdFromTest = $null
-try {
-    $configDir = "$env:PROGRAMDATA\HustEDRAgent"
-    if (!(Test-Path $configDir)) {
-        New-Item -ItemType Directory -Path $configDir -Force | Out-Null
-    }
-    
-    # Create an initial config file for the test with empty agent ID
-    $configFilePath = "$configDir\config.yaml"
-    $logFileEscaped = $logDir.Replace("\", "/") + "/edr-agent.log"
-    $dataFileEscaped = $configDir.Replace("\", "/") + "/data"
-    @"
-server_address: $gRPCHost
-agent_id: ""
-log_file: "$logFileEscaped"
-data_dir: "$dataFileEscaped"
-scan_interval: 5
-metrics_interval: 2
-version: "1.0.1"
-"@ | Set-Content -Path $configFilePath
-    Write-Host "Created initial config file at $configFilePath" -ForegroundColor Green
-    
-    # Testing connection to gRPC server
-    Write-Host "Testing connection to gRPC server: $gRPCHost" -ForegroundColor Yellow
-    $processArgs = @("-config=`"$configFilePath`"")
-    $testProcess = Start-Process -FilePath $edrExe -ArgumentList $processArgs -NoNewWindow -PassThru
-    
-    # Wait a bit for registration to happen, but don't wait too long for test
-    $testTimeout = 15 # seconds
-    $testInterval = 1 # seconds
-    $elapsed = 0
-    
-    # Log the test output in real-time to see connection issues
-    $testLogFile = "$logDir\edr-agent-test.log"
-    while (-not $testProcess.HasExited -and $elapsed -lt $testTimeout) {
-        Write-Host "Waiting for test process... ($elapsed/$testTimeout seconds)" -ForegroundColor Yellow
-        if (Test-Path $configFilePath) {
-            $configContent = Get-Content -Path $configFilePath -Raw -ErrorAction SilentlyContinue
-            if ($configContent -match "agent_id:\s*""([^""]+)""" -and $matches[1] -ne "") {
-                $agentIdFromTest = $matches[1]
-                Write-Host "Retrieved agent ID from test: $agentIdFromTest" -ForegroundColor Green
-                break
+    catch {
+        Write-Warning "WebClient download failed, trying alternative methods..."
+        
+        try {
+            # Secondary method: BITS Transfer
+            if (Get-Command Start-BitsTransfer -ErrorAction SilentlyContinue) {
+                Write-Step "Using BITS Transfer..."
+                Start-BitsTransfer -Source $Url -Destination $OutputFile
+                Write-Success "$Description downloaded successfully via BITS"
+                return $true
             }
         }
-        Start-Sleep -s $testInterval
-        $elapsed += $testInterval
-    }
-    
-    # If still running after timeout, kill the process
-    if (-not $testProcess.HasExited) {
-        Write-Host "Test registration timeout, terminating test process" -ForegroundColor Yellow
-        Stop-Process -Id $testProcess.Id -Force -ErrorAction SilentlyContinue
-    }
-    
-    # Check if test was successful
-    if ($agentIdFromTest) {
-        # Now we have the agent ID, let's make sure our config file has it
-        $logFileEscaped = $logDir.Replace("\", "/") + "/edr-agent.log"
-        $dataFileEscaped = $configDir.Replace("\", "/") + "/data"
-        @"
-server_address: $gRPCHost
-agent_id: "$agentIdFromTest"
-log_file: "$logFileEscaped"
-data_dir: "$dataFileEscaped"
-scan_interval: 5
-metrics_interval: 2
-version: "1.0.1"
-"@ | Set-Content -Path $configFilePath
-        Write-Host "Updated config file with agent ID" -ForegroundColor Green
-        Write-Host "EDR Agent executable test successful." -ForegroundColor Green
-    } else {
-        # Test failed, but we'll try running the service directly
-        Write-Host "Could not obtain agent ID during test, will try during service installation" -ForegroundColor Yellow
-        if ($testProcess.ExitCode -ne $null) {
-            Write-Host "Test process exit code: $($testProcess.ExitCode)" -ForegroundColor Yellow
+        catch {
+            Write-Warning "BITS Transfer failed, trying Invoke-WebRequest..."
+        }
+        
+        try {
+            # Tertiary method: Invoke-WebRequest
+            Invoke-WebRequest -Uri $Url -OutFile $OutputFile -UseBasicParsing
+            Write-Success "$Description downloaded successfully via Invoke-WebRequest"
+            return $true
+        }
+        catch {
+            Write-Error "All download methods failed for $Description`: $_"
+            return $false
         }
     }
-} catch {
-    Write-Host "Error testing EDR Agent executable: $_" -ForegroundColor Yellow
 }
 
-# Download and install NSSM
-Write-Host "Downloading NSSM (Non-Sucking Service Manager)..."
-if (!(Test-Path $nssmDir)) {
-    New-Item -ItemType Directory -Path $nssmDir -Force | Out-Null
-}
-
-try {
-    # Download NSSM
-    Download-File -Url $nssmUrl -OutputFile $nssmZip
+function Remove-ExistingService {
+    Write-Step "Checking for existing service..."
     
-    # Extract NSSM
-    Write-Host "Extracting NSSM..."
-    Add-Type -AssemblyName System.IO.Compression.FileSystem
-    [System.IO.Compression.ZipFile]::ExtractToDirectory($nssmZip, $nssmDir)
-    
-    # Verify NSSM exists
-    if (!(Test-Path $nssmExe)) {
-        throw "NSSM executable not found at expected path: $nssmExe"
+    $existingService = Get-Service -Name $SERVICE_NAME -ErrorAction SilentlyContinue
+    if ($existingService) {
+        Write-Step "Removing existing service '$SERVICE_NAME'..."
+        try {
+            Stop-Service -Name $SERVICE_NAME -Force -ErrorAction SilentlyContinue
+            Start-Sleep -Seconds 2
+            sc.exe delete $SERVICE_NAME | Out-Null
+            Start-Sleep -Seconds 2
+            Write-Success "Existing service removed successfully"
+        }
+        catch {
+            Write-Warning "Could not remove existing service: $_"
+        }
     }
-} catch {
-    Write-Host "Error downloading or extracting NSSM: $_" -ForegroundColor Red
+}
+
+function Install-ServiceWithNSSM {
+    Write-Step "Creating Windows Service with NSSM..."
+    
+    try {
+        # Remove any existing service with NSSM
+        $existingService = Get-Service -Name $SERVICE_NAME -ErrorAction SilentlyContinue
+        if ($existingService) {
+            Stop-Service -Name $SERVICE_NAME -Force -ErrorAction SilentlyContinue
+            & $NSSM_EXE remove $SERVICE_NAME confirm
+            Start-Sleep -Seconds 3
+        }
+        
+        # Install new service
+        & $NSSM_EXE install $SERVICE_NAME $AGENT_BINARY
+        & $NSSM_EXE set $SERVICE_NAME AppParameters "--config `"$CONFIG_FILE`""
+        & $NSSM_EXE set $SERVICE_NAME DisplayName $SERVICE_DISPLAY_NAME
+        & $NSSM_EXE set $SERVICE_NAME Description $SERVICE_DESCRIPTION
+        & $NSSM_EXE set $SERVICE_NAME Start SERVICE_AUTO_START
+        & $NSSM_EXE set $SERVICE_NAME AppDirectory $INSTALL_DIR
+        
+        # Set logging and recovery options
+        & $NSSM_EXE set $SERVICE_NAME AppStdout "$LOGS_DIR\stdout.log"
+        & $NSSM_EXE set $SERVICE_NAME AppStderr "$LOGS_DIR\stderr.log"
+        & $NSSM_EXE set $SERVICE_NAME AppRotateFiles 1
+        & $NSSM_EXE set $SERVICE_NAME AppRotateOnline 1
+        & $NSSM_EXE set $SERVICE_NAME AppRotateSeconds 86400
+        & $NSSM_EXE set $SERVICE_NAME AppRotateBytes 1048576
+        & $NSSM_EXE set $SERVICE_NAME AppExit Default Restart
+        & $NSSM_EXE set $SERVICE_NAME AppRestartDelay 5000
+        
+        Write-Success "Windows Service created successfully with NSSM"
+        return $true
+    }
+    catch {
+        Write-Error "Failed to create Windows Service with NSSM: $_"
+        return $false
+    }
+}
+
+function Set-FilePermissions {
+    Write-Step "Setting file permissions..."
+    
+    try {
+        icacls $INSTALL_DIR /grant "SYSTEM:(OI)(CI)F" /T | Out-Null
+        icacls $INSTALL_DIR /grant "Administrators:(OI)(CI)F" /T | Out-Null
+        icacls $INSTALL_DIR /grant "Users:(OI)(CI)RX" /T | Out-Null
+        Write-Success "File permissions set successfully"
+        return $true
+    }
+    catch {
+        Write-Warning "Failed to set file permissions: $_"
+        return $false
+    }
+}
+
+function Start-ServiceSafely {
+    Write-Step "Starting EDR Agent service..."
+    
+    try {
+        Start-Service -Name $SERVICE_NAME
+        Start-Sleep -Seconds 5
+        
+        $serviceStatus = Get-Service -Name $SERVICE_NAME
+        if ($serviceStatus.Status -eq "Running") {
+            Write-Success "EDR Agent service started successfully"
+            return $true
+        }
+        else {
+            Write-Warning "EDR Agent service is not running. Status: $($serviceStatus.Status)"
+            
+            # Check logs for troubleshooting
+            if (Test-Path "$LOGS_DIR\stderr.log") {
+                Write-Step "Last 10 lines of stderr log:"
+                Get-Content "$LOGS_DIR\stderr.log" -Tail 10 -ErrorAction SilentlyContinue
+            }
+            
+            return $false
+        }
+    }
+    catch {
+        Write-Warning "Failed to start EDR Agent service: $_"
+        return $false
+    }
+}
+
+function Invoke-Cleanup {
+    Write-Step "Cleaning up temporary files..."
+    
+    try {
+        if (Test-Path $TEMP_DIR) {
+            Remove-Item -Path $TEMP_DIR -Recurse -Force -ErrorAction SilentlyContinue
+        }
+        Write-Success "Temporary files cleaned up"
+    }
+    catch {
+        Write-Warning "Could not clean up some temporary files: $_"
+    }
+}
+
+function Show-InstallationSummary {
+    Write-Header "Installation Summary"
+    Write-Host "Installation Directory: $INSTALL_DIR" -ForegroundColor White
+    Write-Host "Configuration File: $CONFIG_FILE" -ForegroundColor White
+    Write-Host "Data Directory: $DATA_DIR" -ForegroundColor White
+    Write-Host "Logs Directory: $LOGS_DIR" -ForegroundColor White
+    Write-Host "CA Certificate: $CA_CERT_FILE" -ForegroundColor White
+    Write-Host "Service Name: $SERVICE_NAME" -ForegroundColor White
+    Write-Host "Server Address: $gRPCHost" -ForegroundColor White
+    }
+
+#==============================================================================
+# Main Installation Process
+#==============================================================================
+
+Write-Header "$SCRIPT_NAME v$SCRIPT_VERSION"
+Write-Host "Installing EDR Agent to $INSTALL_DIR" -ForegroundColor Yellow
+
+# Check administrator privileges
+if (-not (Test-Administrator)) {
+    Write-Error "This script must be run as Administrator!"
+    Write-Host "Please right-click PowerShell and select 'Run as Administrator'" -ForegroundColor Red
     exit 1
 }
 
-# Create log file paths
-$stdoutLog = "$logDir\edr-agent-stdout.log"
-$stderrLog = "$logDir\edr-agent-stderr.log"
+# Initialize environment
+Initialize-Environment
 
-# Install service using NSSM
-Write-Host "Installing EDR Agent service using NSSM..."
-Write-Host "gRPC Server: $gRPCHost" -ForegroundColor Yellow
-
-# Create a new service
-try {
-    # Remove existing service if it exists (with confirmation suppressed)
-    & $nssmExe remove $serviceName confirm 2>$null
-    
-    # Allow a moment for any removal to complete
-    Start-Sleep -s 1
-    
-    # Make sure we have a valid config file
-    $configFilePath = "$env:PROGRAMDATA\HustEDRAgent\config.yaml"
-    if (-not (Test-Path $configFilePath)) {
-        # If config file doesn't exist, create it now
-        $logFileEscaped = $logDir.Replace("\", "/") + "/edr-agent.log"
-        $dataFileEscaped = "$env:PROGRAMDATA\HustEDRAgent".Replace("\", "/") + "/data"
-        @"
-server_address: $gRPCHost
-agent_id: ""
-log_file: "$logFileEscaped"
-data_dir: "$dataFileEscaped"
-scan_interval: 5
-metrics_interval: 2
-version: "1.0.1"
-"@ | Set-Content -Path $configFilePath
-        Write-Host "Created config file for service at $configFilePath" -ForegroundColor Green
-    }
-    
-    # Always install the service with config file
-    Write-Host "Installing service using config file: $configFilePath" -ForegroundColor Green
-    & $nssmExe install $serviceName $edrExe "-config `"$configFilePath`""
-    
-    if ($LASTEXITCODE -ne 0) {
-        throw "NSSM returned exit code $LASTEXITCODE"
-    }
-    
-    Write-Host "Service installation successful" -ForegroundColor Green
-} catch {
-    Write-Host "Error during service installation: $_" -ForegroundColor Red
-    
-    # Try alternative approach if the first one fails
-    Write-Host "Trying alternative installation method..." -ForegroundColor Yellow
-    try {
-        # Always use config file for alternative method too
-        & sc.exe create $serviceName binPath= "$edrExe -config $configFilePath" DisplayName= "EDR Agent Service" start= auto
-        
-        if ($LASTEXITCODE -ne 0) {
-            throw "sc.exe create returned exit code $LASTEXITCODE"
-        }
-        Write-Host "Alternative service installation successful" -ForegroundColor Green
-    } catch {
-        Write-Host "Alternative service installation also failed: $_" -ForegroundColor Red
-        exit 1
-    }
+# Download agent binary
+if (-not (Invoke-FileDownload -Url $AGENT_URL -OutputFile $AGENT_BINARY -Description "EDR Agent binary")) {
+    exit 1
 }
 
-# Configure service details
-& $nssmExe set $serviceName DisplayName "EDR Agent Service"
-& $nssmExe set $serviceName Description "Endpoint Detection and Response agent service"
-& $nssmExe set $serviceName Start SERVICE_AUTO_START
+# Download CA certificate
+Invoke-FileDownload -Url $CERT_URL -OutputFile $CA_CERT_FILE -Description "CA certificate" | Out-Null
 
-# Configure stdout/stderr redirection
-& $nssmExe set $serviceName AppStdout $stdoutLog
-& $nssmExe set $serviceName AppStderr $stderrLog
-& $nssmExe set $serviceName AppRotateFiles 1
-& $nssmExe set $serviceName AppRotateOnline 1
-& $nssmExe set $serviceName AppRotateSeconds 86400
-& $nssmExe set $serviceName AppRotateBytes 10485760
+# Create configuration file
+Write-Step "Creating configuration file..."
+$caCertPath = $CA_CERT_FILE.Replace('\', '/')
+$hostsFilePath = "C:/Windows/System32/drivers/etc/hosts"
+$dataDirPath = $DATA_DIR.Replace('\', '/')
+
+$configContent = @"
+# EDR Agent Configuration File
+server_address: "$gRPCHost"
+use_tls: true
+ca_cert_path: "$caCertPath"
+insecure_skip_verify: false
+agent_id: ""
+agent_version: "1.0.0"
+log_file: ""
+data_dir: "$dataDirPath"
+log_level: "info"
+log_format: "console"
+scan_interval: 5
+metrics_interval: 10
+connection_timeout: 30
+reconnect_delay: 5
+max_reconnect_delay: 60
+ioc_update_delay: 3
+shutdown_timeout: 500
+cpu_sample_duration: 500
+hosts_file_path: "$hostsFilePath"
+blocked_ip_redirect: "127.0.0.1"
+"@
+
+try {
+    $configContent | Out-File -FilePath $CONFIG_FILE -Encoding UTF8
+    Write-Success "Configuration file created successfully"
+}
+catch {
+    Write-Error "Failed to create configuration file: $_"
+    exit 1
+}
+
+# Remove existing service
+Remove-ExistingService
+
+# Download and extract NSSM
+if (-not (Invoke-FileDownload -Url $NSSM_URL -OutputFile $NSSM_ZIP -Description "NSSM")) {
+    exit 1
+}
+
+try {
+    Expand-Archive -Path $NSSM_ZIP -DestinationPath $NSSM_DIR -Force
+    Write-Success "NSSM extracted successfully"
+}
+catch {
+    Write-Error "Failed to extract NSSM: $_"
+    exit 1
+}
+
+# Install service with NSSM
+if (-not (Install-ServiceWithNSSM)) {
+    exit 1
+}
+
+# Set file permissions
+Set-FilePermissions | Out-Null
 
 # Start the service
-Write-Host "Starting EDR Agent service..."
-try {
-    Start-Service -Name $serviceName -ErrorAction Stop
-    Write-Host "Service start command issued successfully" -ForegroundColor Green
-} catch {
-    Write-Host "Error starting service: $_" -ForegroundColor Red
-    Write-Host "Will attempt to continue anyway..." -ForegroundColor Yellow
-}
+Start-ServiceSafely | Out-Null
 
-# Wait for service to start with proper feedback
-$maxWaitTime = 30  # seconds
-$waitInterval = 3  # seconds
-$elapsed = 0
+# Clean up
+Invoke-Cleanup
 
-while ($elapsed -lt $maxWaitTime) {
-    Write-Host "Waiting for service to start... ($elapsed/$maxWaitTime seconds)" -ForegroundColor Yellow
-    $service = Get-Service $serviceName -ErrorAction SilentlyContinue
-    
-    if ($service -and $service.Status -eq "Running") {
-        Write-Host "EDR Agent service started successfully!" -ForegroundColor Green
-        Write-Host "Service stdout logs: $stdoutLog" -ForegroundColor Green
-        Write-Host "Service stderr logs: $stderrLog" -ForegroundColor Green
-        break
-    }
-    
-    Start-Sleep -s $waitInterval
-    $elapsed += $waitInterval
-}
+# Show summary
+Show-InstallationSummary
 
-# Final check
-$service = Get-Service $serviceName -ErrorAction SilentlyContinue
-if (-not $service -or $service.Status -ne "Running") {
-    Write-Host "WARNING: Service did not start within the expected time." -ForegroundColor Red
-    Write-Host "Current status: $($service.Status)" -ForegroundColor Red
-    Write-Host "Check logs for more information:" -ForegroundColor Yellow
-    Write-Host "  - Stdout: $stdoutLog" -ForegroundColor Yellow
-    Write-Host "  - Stderr: $stderrLog" -ForegroundColor Yellow
-    
-    # Show log content if available
-    if (Test-Path $stderrLog) {
-        Write-Host "Last 10 lines of stderr log:" -ForegroundColor Yellow
-        Get-Content -Path $stderrLog -Tail 10
-    }
-    
-    # Don't exit here, as we want to complete the rest of the installation
-    Write-Host "Continuing with installation despite service start issues..." -ForegroundColor Yellow
-}
-
-# Create environment variable for EDR path
-[System.Environment]::SetEnvironmentVariable("EDR_HOME", $edrDir, [System.EnvironmentVariableTarget]::Machine)
-Write-Host "Added EDR_HOME environment variable pointing to $edrDir"
-
-
-if (Test-Path $nssmZip) {
-    Remove-Item -Path $nssmZip -Force -ErrorAction SilentlyContinue
-    Write-Host "NSSM zip file removed."
-}
-
-Write-Host "EDR Agent installation complete in $edrDir" 
+Write-Host "`nHUST EDR Agent installation completed successfully!" -ForegroundColor Green
+Write-Host "The agent should now be running and connecting to the server." -ForegroundColor Yellow

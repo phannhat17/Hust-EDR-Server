@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
@@ -50,6 +51,9 @@ func main() {
 		log.Fatalf("Failed to load configuration: %v", err)
 	}
 	
+	// DEBUG: Print loaded config values
+	log.Printf("DEBUG: After loading config - cfg.AgentID='%s'", cfg.AgentID)
+	
 	// Ensure agent version is set
 	if cfg.AgentVersion == "" {
 		cfg.AgentVersion = config.DefaultAgentVersion
@@ -89,6 +93,9 @@ func main() {
 		log.Fatalf("Failed to apply configuration flags: %v", err)
 	}
 
+	// DEBUG: Print config values after applying flags
+	log.Printf("DEBUG: After applying flags - cfg.AgentID='%s'", cfg.AgentID)
+
 	// Setup data directory
 	if err := os.MkdirAll(cfg.DataDir, 0755); err != nil {
 		log.Fatalf("Failed to create data directory: %v", err)
@@ -115,6 +122,9 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	// Store original agent ID before registration (to check if we need to save config)
+	originalAgentID := cfg.AgentID
+
 	// Register with server
 	agentInfo, err := edrClient.Register(ctx)
 	if err != nil {
@@ -123,15 +133,29 @@ func main() {
 
 	log.Printf("Registered with server as agent ID: %s", agentInfo.AgentID)
 	
-	// If agent ID was newly assigned, update config and save
-	if cfg.AgentID == "" || cfg.AgentID != agentInfo.AgentID {
+	// Always save agent ID if it's empty or different from server response
+	log.Printf("DEBUG: originalAgentID='%s', agentInfo.AgentID='%s'", originalAgentID, agentInfo.AgentID)
+	
+	if originalAgentID == "" || originalAgentID != agentInfo.AgentID {
+		log.Printf("DEBUG: Condition met, saving config...")
 		cfg.AgentID = agentInfo.AgentID
 		if err := cfg.SaveConfig(*configFile); err != nil {
 			log.Printf("Failed to save updated config: %v", err)
 		} else {
-			log.Printf("Updated configuration with assigned agent ID")
+			log.Printf("Updated configuration with assigned agent ID: %s", agentInfo.AgentID)
 		}
+	} else {
+		log.Printf("DEBUG: Condition NOT met, skipping config save")
 	}
+
+	// Send explicit ONLINE status after startup is complete
+	log.Printf("Sending ONLINE status to server...")
+	metrics := map[string]float64{
+		"cpu_usage":    0.0, // Will be updated by first ping
+		"memory_usage": 0.0,
+		"uptime":       0.0,
+	}
+	edrClient.SendStatusUpdate("ONLINE", metrics)
 
 	// Get command handler for IOC Scanner configuration
 	commandHandler := edrClient.GetCommandHandler()
@@ -146,6 +170,9 @@ func main() {
 		defer wg.Done()
 		edrClient.StartCommandStream(ctx)
 	}()
+
+	// Give time for the command stream to establish before sending ONLINE status
+	time.Sleep(2 * time.Second)
 
 	// Request IOC updates on startup with configured delay
 	wg.Add(1)
@@ -177,7 +204,22 @@ func main() {
 	// Handle graceful shutdown
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-	<-sigChan
+	sig := <-sigChan
+
+	logging.Info().Str("signal", sig.String()).Msg("Shutdown signal received")
+
+	// Send explicit OFFLINE status to server
+	log.Printf("Sending OFFLINE status to server...")
+	offlineMetrics := map[string]float64{
+		"cpu_usage":    0.0,
+		"memory_usage": 0.0,
+		"uptime":       0.0,
+	}
+	edrClient.SendStatusUpdate("OFFLINE", offlineMetrics)
+
+	// Send shutdown signal to server (legacy)
+	shutdownReason := fmt.Sprintf("Graceful shutdown due to signal: %s", sig.String())
+	edrClient.SendShutdownSignal(ctx, shutdownReason)
 
 	logging.Info().Msg("Shutting down agent...")
 

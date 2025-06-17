@@ -7,6 +7,7 @@ import (
 	"log"
 	"math"
 	"math/rand"
+	"os"
 	"sync"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 	"crypto/tls"
+	"crypto/x509"
 
 	"github.com/shirou/gopsutil/v3/cpu"
 	"github.com/shirou/gopsutil/v3/mem"
@@ -29,6 +31,12 @@ func init() {
 	rand.Seed(time.Now().UnixNano())
 }
 
+// Channel for sending status updates through the main stream
+type statusUpdate struct {
+	status  string
+	metrics map[string]float64
+}
+
 // EDRClient represents a client for communicating with the EDR server
 type EDRClient struct {
 	serverAddress   string
@@ -40,6 +48,7 @@ type EDRClient struct {
 	dataDir         string
 	useTLS          bool
 	config          *config.Config
+	statusChan      chan statusUpdate // Channel for sending status updates
 }
 
 // NewEDRClient creates a new EDR client (legacy function)
@@ -65,20 +74,50 @@ func NewEDRClientWithConfig(cfg *config.Config) (*EDRClient, error) {
 	var err error
 
 	if cfg.UseTLS {
-		// Create the credentials and skip certificate verification for self-signed certs
-		creds := credentials.NewTLS(&tls.Config{
-			InsecureSkipVerify: true, // Skip certificate verification for testing
-		})
-
+		var creds credentials.TransportCredentials
+		
+		if cfg.InsecureSkipVerify {
+			// Skip certificate verification (not recommended for production)
+			creds = credentials.NewTLS(&tls.Config{
+				InsecureSkipVerify: true,
+			})
+			logging.Warn().
+				Str("server", cfg.ServerAddress).
+				Bool("insecure_skip_verify", true).
+				Msg("Connected to server with TLS but skipping certificate verification (not recommended for production)")
+		} else if cfg.CACertPath != "" {
+			// Use custom CA certificate for verification
+			caCert, err := os.ReadFile(cfg.CACertPath)
+			if err != nil {
+				return nil, fmt.Errorf("failed to read CA certificate file %s: %v", cfg.CACertPath, err)
+			}
+			
+			caCertPool := x509.NewCertPool()
+			if !caCertPool.AppendCertsFromPEM(caCert) {
+				return nil, fmt.Errorf("failed to parse CA certificate from %s", cfg.CACertPath)
+			}
+			
+			creds = credentials.NewTLS(&tls.Config{
+				RootCAs: caCertPool,
+			})
+			
+			logging.Info().
+				Str("server", cfg.ServerAddress).
+				Str("ca_cert_path", cfg.CACertPath).
+				Msg("Connected to server with TLS using custom CA certificate")
+		} else {
+			// Use system CA certificates for verification
+			creds = credentials.NewTLS(&tls.Config{})
+			
+			logging.Info().
+				Str("server", cfg.ServerAddress).
+				Msg("Connected to server with TLS using system CA certificates")
+		}
+		
 		conn, err = grpc.Dial(cfg.ServerAddress, grpc.WithTransportCredentials(creds))
 		if err != nil {
 			return nil, fmt.Errorf("failed to connect to server with TLS: %v", err)
 		}
-		
-		logging.Info().
-			Str("server", cfg.ServerAddress).
-			Bool("tls", true).
-			Msg("Connected to server with TLS encryption (insecure mode)")
 	} else {
 		// Connect without TLS (insecure)
 		conn, err = grpc.Dial(cfg.ServerAddress, grpc.WithTransportCredentials(insecure.NewCredentials()))
@@ -102,6 +141,7 @@ func NewEDRClientWithConfig(cfg *config.Config) (*EDRClient, error) {
 		dataDir:       cfg.DataDir,
 		useTLS:        cfg.UseTLS,
 		config:        cfg,
+		statusChan:    make(chan statusUpdate, 10), // Buffer size for status updates
 	}
 
 	// Create command handler
@@ -444,23 +484,25 @@ func (c *EDRClient) StartCommandStream(ctx context.Context) {
 				}
 			}()
 			
-			// Start goroutine to send periodic status updates
+			// Start goroutine to send periodic running signals and handle status updates
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
 				
-				// Use the metrics interval from config
-				log.Printf("Creating status ticker with interval of %d minutes", c.config.MetricsInterval)
-				statusTicker := time.NewTicker(c.config.GetMetricsIntervalDuration())
-				defer statusTicker.Stop()
+				// Use the metrics interval from config for ping signals
+				log.Printf("Creating ping signal ticker with interval of %d minutes", c.config.MetricsInterval)
+				pingTicker := time.NewTicker(c.config.GetMetricsIntervalDuration())
+				defer pingTicker.Stop()
 				
-				// Send an initial status update immediately
-				sendStatusUpdate(c, stream, streamClosed, cancelStream)
+				// Send an initial ping signal immediately
+				sendRunningSignal(c, stream, streamClosed, cancelStream)
 				
 				for {
 					select {
-					case <-statusTicker.C:
-						sendStatusUpdate(c, stream, streamClosed, cancelStream)
+					case <-pingTicker.C:
+						sendRunningSignal(c, stream, streamClosed, cancelStream)
+					case statusUpd := <-c.statusChan:
+						sendStatusUpdate(c, stream, streamClosed, cancelStream, statusUpd.status, statusUpd.metrics)
 					case <-streamCtx.Done():
 						return
 					}
@@ -488,8 +530,48 @@ func (c *EDRClient) StartCommandStream(ctx context.Context) {
 }
 
 // Helper function to send status updates
-func sendStatusUpdate(c *EDRClient, stream pb.EDRService_CommandStreamClient, streamClosed chan struct{}, cancelStream context.CancelFunc) {
+func sendStatusUpdate(c *EDRClient, stream pb.EDRService_CommandStreamClient, streamClosed chan struct{}, cancelStream context.CancelFunc, status string, metrics map[string]float64) {
 	// Check if stream is still active before sending status
+	select {
+	case <-streamClosed:
+		return
+	default:
+		log.Printf("Sending status update: %s", status)
+		
+		// Create status update message
+		statusMsg := &pb.StatusRequest{
+			AgentId:   c.agentID,
+			Timestamp: time.Now().Unix(),
+			Status:    status,
+			SystemMetrics: &pb.SystemMetrics{
+				CpuUsage:    metrics["cpu_usage"] * 100,    // Convert from 0-1 to 0-100 scale
+				MemoryUsage: metrics["memory_usage"] * 100, // Convert from 0-1 to 0-100 scale
+				Uptime:      int64(metrics["uptime"]),
+			},
+		}
+		
+		statusUpdateMsg := &pb.CommandMessage{
+			AgentId:     c.agentID,
+			Timestamp:   time.Now().Unix(),
+			MessageType: pb.MessageType_AGENT_STATUS,
+			Payload: &pb.CommandMessage_Status{
+				Status: statusMsg,
+			},
+		}
+		
+		if err := stream.Send(statusUpdateMsg); err != nil {
+			log.Printf("Failed to send status update: %v", err)
+			cancelStream() // Cancel context to signal all goroutines to stop
+			return
+		}
+		
+		log.Printf("Successfully sent status update: %s", status)
+	}
+}
+
+// Helper function to send running signals
+func sendRunningSignal(c *EDRClient, stream pb.EDRService_CommandStreamClient, streamClosed chan struct{}, cancelStream context.CancelFunc) {
+	// Check if stream is still active before sending signal
 	select {
 	case <-streamClosed:
 		return
@@ -501,15 +583,14 @@ func sendStatusUpdate(c *EDRClient, stream pb.EDRService_CommandStreamClient, st
 			"uptime":       float64(getUptime()),
 		}
 		
-		// Log that we're sending status update with proper percentage formatting
-		log.Printf("Sending status update with metrics: CPU: %.2f%%, Memory: %.2f%%, Uptime: %.0fs", 
+		// Log that we're sending ping signal with proper percentage formatting
+		log.Printf("Sending ping signal with metrics: CPU: %.2f%%, Memory: %.2f%%, Uptime: %.0fs", 
 			metrics["cpu_usage"]*100, metrics["memory_usage"]*100, metrics["uptime"])
 		
-		// Create status message - note that ServerMetrics expects values as percentages (0-100)
-		statusReq := &pb.StatusRequest{
+		// Create running signal message
+		runningSignal := &pb.AgentRunning{
 			AgentId:   c.agentID,
 			Timestamp: time.Now().Unix(),
-			Status:    "ONLINE",
 			SystemMetrics: &pb.SystemMetrics{
 				CpuUsage:    metrics["cpu_usage"]*100,  // Convert from 0-1 to 0-100 scale
 				MemoryUsage: metrics["memory_usage"]*100, // Convert from 0-1 to 0-100 scale
@@ -517,17 +598,17 @@ func sendStatusUpdate(c *EDRClient, stream pb.EDRService_CommandStreamClient, st
 			},
 		}
 		
-		statusMsg := &pb.CommandMessage{
+		runningMsg := &pb.CommandMessage{
 			AgentId:     c.agentID,
 			Timestamp:   time.Now().Unix(),
-			MessageType: pb.MessageType_AGENT_STATUS,
-			Payload: &pb.CommandMessage_Status{
-				Status: statusReq,
+			MessageType: pb.MessageType_AGENT_RUNNING,
+			Payload: &pb.CommandMessage_Running{
+				Running: runningSignal,
 			},
 		}
 		
-		if err := stream.Send(statusMsg); err != nil {
-			log.Printf("Failed to send status update: %v", err)
+		if err := stream.Send(runningMsg); err != nil {
+			log.Printf("Failed to send running signal: %v", err)
 			cancelStream() // Cancel context to signal all goroutines to stop
 			return
 		}
@@ -619,6 +700,42 @@ func (c *EDRClient) RequestIOCUpdates(ctx context.Context) {
 	}
 }
 
+// SendShutdownSignal sends a shutdown signal to the server before closing
+func (c *EDRClient) SendShutdownSignal(ctx context.Context, reason string) {
+	log.Printf("Sending shutdown signal to server: %s", reason)
+	
+	// Try to send shutdown signal via command stream if available
+	stream, err := c.edrClient.CommandStream(ctx)
+	if err != nil {
+		log.Printf("Failed to create stream for shutdown signal: %v", err)
+		return
+	}
+	
+	shutdownSignal := &pb.AgentShutdown{
+		AgentId:   c.agentID,
+		Timestamp: time.Now().Unix(),
+		Reason:    reason,
+	}
+	
+	shutdownMsg := &pb.CommandMessage{
+		AgentId:     c.agentID,
+		Timestamp:   time.Now().Unix(),
+		MessageType: pb.MessageType_AGENT_SHUTDOWN,
+		Payload: &pb.CommandMessage_Shutdown{
+			Shutdown: shutdownSignal,
+		},
+	}
+	
+	if err := stream.Send(shutdownMsg); err != nil {
+		log.Printf("Failed to send shutdown signal: %v", err)
+	} else {
+		log.Printf("Shutdown signal sent successfully")
+	}
+	
+	// Close the stream
+	stream.CloseSend()
+}
+
 // Close closes the client connection
 func (c *EDRClient) Close() error {
 	return c.conn.Close()
@@ -635,4 +752,14 @@ type AgentInfo struct {
 	AgentVersion  string
 	RegisteredAt  time.Time
 	ServerMessage string
+}
+
+// SendStatusUpdate sends a status update through the main command stream
+func (c *EDRClient) SendStatusUpdate(status string, metrics map[string]float64) {
+	select {
+	case c.statusChan <- statusUpdate{status: status, metrics: metrics}:
+		log.Printf("Queued status update: %s", status)
+	default:
+		log.Printf("Status update channel full, dropping status update: %s", status)
+	}
 } 

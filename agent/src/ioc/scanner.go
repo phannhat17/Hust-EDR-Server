@@ -6,14 +6,11 @@ import (
 	"crypto/sha1"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/xml"
 	"fmt"
 	"io"
 	"log"
 	"net"
 	"os"
-	"os/exec"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -278,186 +275,16 @@ func (s *Scanner) checkAndBlockNewIPs() {
 
 // scanSysmonLogs scans Windows sysmon logs for file hash matches
 func (s *Scanner) scanSysmonLogs() {
-	log.Printf("Scanning Windows sysmon logs for file hash matches")
+	log.Printf("Scanning Windows sysmon logs for file hash matches using efficient API method")
 	
-	// Try efficient API-based scanning first, fallback to XML export if needed
+	// Use only the efficient API-based scanning, no file export
 	if err := s.scanWindowsSysmonLogsEfficient(); err != nil {
-		log.Printf("Efficient scanning failed (%v), falling back to XML export method", err)
-		s.scanWindowsSysmonLogs()
+		log.Printf("Efficient API-based scanning failed: %v", err)
+		log.Printf("File export method has been removed for security and performance reasons")
 	}
 }
 
-// XML structures for parsing Sysmon events
-type Events struct {
-	XMLName xml.Name `xml:"Events"`
-	Event   []Event  `xml:"Event"`
-}
 
-type Event struct {
-	System    System    `xml:"System"`
-	EventData EventData `xml:"EventData"`
-}
-
-type System struct {
-	EventID    int       `xml:"EventID"`
-	TimeCreated TimeCreated `xml:"TimeCreated"`
-}
-
-type TimeCreated struct {
-	SystemTime string `xml:"SystemTime,attr"`
-}
-
-type EventData struct {
-	Data []Data `xml:"Data"`
-}
-
-type Data struct {
-	Name  string `xml:"Name,attr"`
-	Value string `xml:",chardata"`
-}
-
-// scanWindowsSysmonLogs scans Windows Sysmon event logs for file creation events
-func (s *Scanner) scanWindowsSysmonLogs() {
-	// Get the timestamp for last scan in the format expected by wevtutil
-	// Format: yyyy-MM-ddTHH:mm:ss.sssZ
-	lastScanTimeStr := s.lastScanTime.Format("2006-01-02T15:04:05.000Z")
-	
-	// On Windows, we need to export recent events to a temporary file
-	tempFile := filepath.Join(os.TempDir(), "edr_sysmon_export.xml")
-	
-	// Build query to get events since last scan (both file creation and hash events)
-	// EventID 1 = Process creation
-	// EventID 11 = File creation
-	// EventID 15 = File create stream hash
-	// EventID 23 = File delete
-	// EventID 29 = Remote thread creation - often used in malware injection
-	queryStr := fmt.Sprintf("*[System[(EventID=1 or EventID=11 or EventID=15 or EventID=23 or EventID=29) and TimeCreated[@SystemTime>'%s']]]", lastScanTimeStr)
-	
-	// Export sysmon events
-	var output []byte
-	var err error
-	
-	// Try up to 3 times with increasing delays
-	for attempt := 1; attempt <= 3; attempt++ {
-		cmd := exec.Command("wevtutil", "qe", "Microsoft-Windows-Sysmon/Operational", 
-			"/q:"+queryStr, "/e:Events", "/f:xml", "/uni:true")
-		
-		output, err = cmd.Output()
-		if err == nil {
-			break
-		}
-		
-		log.Printf("Attempt %d: Failed to export sysmon events: %v", attempt, err)
-		if attempt < 3 {
-			// Wait with exponential backoff
-			waitTime := time.Duration(attempt*attempt) * time.Second
-			log.Printf("Retrying in %v...", waitTime)
-			time.Sleep(waitTime)
-		}
-	}
-	
-	if err != nil {
-		log.Printf("All attempts to export sysmon events failed. Last error: %v", err)
-		return
-	}
-	
-	// Write to temp file
-	if err := os.WriteFile(tempFile, output, 0644); err != nil {
-		log.Printf("Failed to write sysmon events to temp file: %v", err)
-		return
-	}
-	defer os.Remove(tempFile)
-	
-	// Record current time for next scan
-	s.lastScanTime = time.Now()
-	
-	// Parse the XML properly
-	fileContent, err := os.ReadFile(tempFile)
-	if err != nil {
-		log.Printf("Failed to read sysmon export: %v", err)
-		return
-	}
-	
-	var events Events
-	if err := xml.Unmarshal(fileContent, &events); err != nil {
-		log.Printf("Failed to parse sysmon XML: %v", err)
-		return
-	}
-	
-	// Process each event
-	for _, event := range events.Event {
-		// Map to store data for each event
-		eventData := make(map[string]string)
-		
-		// Extract data
-		for _, data := range event.EventData.Data {
-			if data.Name != "" {
-				eventData[data.Name] = data.Value
-			}
-		}
-		
-		// Process based on event type
-		switch event.System.EventID {
-		case 1: // Process creation
-			if hash, ok := eventData["Hashes"]; ok {
-				image := eventData["Image"]
-				s.processHashesData(hash, image)
-			}
-		case 11: // File creation
-			targetPath := eventData["TargetFilename"]
-			// For file creation, try to calculate hash ourselves
-			if targetPath != "" {
-				hashValue, err := s.calculateFileHash(targetPath)
-				if err == nil {
-					// Check if hash matches IOCs
-					match, ioc := s.manager.CheckFileHash(hashValue)
-					if match {
-						s.handleMaliciousFile(targetPath, hashValue, &ioc)
-					}
-				}
-			}
-		case 15: // File create stream hash
-			if hash, ok := eventData["Hash"]; ok {
-				filePath := eventData["TargetFilename"]
-				s.processHashesData(hash, filePath)
-			}
-		case 23: // File delete (still check in case a malicious file was deleted)
-			if hash, ok := eventData["Hashes"]; ok {
-				image := eventData["Image"]
-				s.processHashesData(hash, image)
-			}
-		case 29: // Remote thread creation (potential code injection)
-			sourceImage := eventData["SourceImage"]
-			targetImage := eventData["TargetImage"]
-			
-			// Get file hashes for both processes if possible
-			sourceHash, err := s.calculateFileHash(sourceImage)
-			if err == nil {
-				// Check source process hash
-				match, ioc := s.manager.CheckFileHash(sourceHash)
-				if match {
-					log.Printf("Malicious process creating remote thread detected: %s (%s)", sourceImage, sourceHash)
-					s.handleMaliciousFile(sourceImage, sourceHash, &ioc)
-				}
-			}
-			
-			// Check target process too (in case malware is injecting into a known bad process)
-			targetHash, err := s.calculateFileHash(targetImage)
-			if err == nil {
-				match, ioc := s.manager.CheckFileHash(targetHash)
-				if match {
-					log.Printf("Remote thread created in malicious process: %s (%s)", targetImage, targetHash)
-					s.handleMaliciousFile(targetImage, targetHash, &ioc)
-				}
-			}
-			
-			// Log the event for auditing purposes even if no matches
-			log.Printf("Remote thread created from %s to %s", sourceImage, targetImage)
-		}
-	}
-	
-	log.Printf("Sysmon log scan complete, found %d events", len(events.Event))
-}
 
 // processHashesData processes hash data in format SHA256=X,MD5=Y,SHA1=Z
 func (s *Scanner) processHashesData(hashData string, filePath string) {
