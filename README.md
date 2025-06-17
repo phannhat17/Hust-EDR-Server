@@ -16,7 +16,7 @@ A comprehensive Endpoint Detection and Response (EDR) system consisting of a ser
 - Python 3.8+
 - Docker compose
 - Node.js 16+ and npm & pnpm
-- Elasticsearch instance
+- [Elasticsearch](https://www.elastic.co/docs/deploy-manage/deploy/self-managed/installing-elasticsearch) and [Kibana](https://www.elastic.co/docs/deploy-manage/deploy/self-managed/install-kibana) instance.
 - ElastAlert container (for rule execution)
 - Go lang
 - gRPC
@@ -45,8 +45,6 @@ A comprehensive Endpoint Detection and Response (EDR) system consisting of a ser
    ```
    python server.py
    ``` 
-
-> **Security Note**: The frontend is currently making direct API calls from the browser, which may lead to CORS policy violations and prevent successful communication with the backend. As a temporary workaround, CORS has been disabled to allow these requests. This will be addressed and properly configured in future versions (hopefully 😅).
 
 ### Frontend Setup
 
