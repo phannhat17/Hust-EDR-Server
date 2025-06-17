@@ -5,296 +5,459 @@
 # 3. Winlogbeat with EDR ID configuration
 # Must be run with administrator privileges
 
-function Install-EDRStack {
-    param(
-        [string]$ServerHost = "192.168.133.145:5000",
-        [string]$gRPCHost = "192.168.133.145",
-        [string]$gRPCPort = "50051",
-        [string]$UseTLS = "true",
-        [bool]$InsecureSkipVerify = $false
-    )
+param(
+    [string]$ServerHost = "192.168.133.145:5000",
+    [string]$gRPCHost = "192.168.133.145:50051",
+    [string]$UseTLS = "true",
+    [bool]$InsecureSkipVerify = $false
+)
 
-    Write-Host "Starting HUST-EDR Stack Installation..." -ForegroundColor Cyan
-    Write-Host "=======================================" -ForegroundColor Cyan
-    Write-Host "Server Host: $ServerHost" -ForegroundColor Cyan
-    Write-Host "gRPC Host: $gRPCHost" -ForegroundColor Cyan
-    Write-Host "gRPC Port: $gRPCPort" -ForegroundColor Cyan
-    Write-Host "Use TLS: $UseTLS" -ForegroundColor Cyan
+#==============================================================================
+# HUST EDR Stack Installation Script
+# Description: Orchestrates installation of complete EDR stack
+#              1. HUST-EDR Agent, 2. Sysmon, 3. Winlogbeat
+# Requirements: Administrator privileges
+# Version: 2.0
+#==============================================================================
 
-    # Check for administrator privileges
+# Script Configuration
+$SCRIPT_NAME = "HUST EDR Stack Installer"
+$SCRIPT_VERSION = "2.0"
+
+# Installation Paths
+$TEMP_DIR = "$env:TEMP\EDRStackInstall"
+$EDR_CONFIG_PATH = "C:\Program Files\HUST-EDR-Agent\config.yaml"
+$EDR_LOG_PATH = "C:\Program Files\HUST-EDR-Agent\logs"
+$WINLOGBEAT_CONFIG_PATH = "C:\Program Files\Winlogbeat\winlogbeat.yml"
+
+# File Paths
+$EDR_SCRIPT_PATH = "$TEMP_DIR\install_edr_agent.ps1"
+$SYSMON_SCRIPT_PATH = "$TEMP_DIR\install_sysmon.ps1"
+$WINLOGBEAT_SCRIPT_PATH = "$TEMP_DIR\install_winlogbeat.ps1"
+$WINLOGBEAT_CONFIG_FILE = "$TEMP_DIR\winlogbeat.yml"
+$EDR_LOG_FILE = "$TEMP_DIR\edr_install.log"
+
+# Build URLs
+$EDR_SCRIPT_URL = "http://$ServerHost/api/install/edr-agent-script?grpc_host=$gRPCHost&server_host=$ServerHost" 
+$SYSMON_SCRIPT_URL = "http://$ServerHost/api/install/sysmon-script"
+$WINLOGBEAT_SCRIPT_URL = "http://$ServerHost/api/install/winlogbeat-script?host=$ServerHost"
+$WINLOGBEAT_CONFIG_URL = "http://$ServerHost/api/install/winlogbeat-config"
+
+if ($InsecureSkipVerify) {
+    $EDR_SCRIPT_URL += "&insecure_skip_verify=true"
+}
+
+# Stack Components
+$STACK_COMPONENTS = @(
+    @{ Name = "HUST-EDR Agent"; ServiceName = "HUST-EDR-Agent" }
+    @{ Name = "Sysmon"; ServiceName = "Sysmon64" }
+    @{ Name = "Winlogbeat"; ServiceName = "winlogbeat" }
+)
+
+#==============================================================================
+# Common Functions
+#==============================================================================
+
+function Write-Header {
+    param([string]$Title, [string]$Color = "Green")
+    Write-Host "`n=== $Title ===" -ForegroundColor $Color
+}
+
+function Write-Step {
+    param([string]$Message)
+    Write-Host $Message -ForegroundColor Yellow
+}
+
+function Write-Success {
+    param([string]$Message)
+    Write-Host $Message -ForegroundColor Green
+}
+
+function Write-Warning {
+    param([string]$Message)
+    Write-Host "WARNING: $Message" -ForegroundColor Yellow
+}
+
+function Write-Error {
+    param([string]$Message)
+    Write-Host "ERROR: $Message" -ForegroundColor Red
+}
+
+function Test-Administrator {
     $currentPrincipal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
-    if (-not $currentPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-        Write-Host "This script requires administrator privileges. Please run as administrator." -ForegroundColor Red
-        return
+    return $currentPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
+function Initialize-Environment {
+    Write-Step "Initializing stack installation environment..."
+    
+    # Set security protocol
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+    
+    # Create temp directory
+    if (!(Test-Path $TEMP_DIR)) {
+        New-Item -ItemType Directory -Path $TEMP_DIR -Force | Out-Null
     }
+    
+    Write-Success "Environment initialized successfully"
+}
 
-    # Create temp directory for downloads
-    $tempDir = "$env:TEMP\EDRStackInstall"
-    if (!(Test-Path $tempDir)) {
-        New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
-        Write-Host "Created temporary directory: $tempDir"
-    }
-
-    # Function for downloading scripts
-    function Download-Script {
-        param (
-            [string]$Url,
-            [string]$OutputFile
-        )
-        
-        Write-Host "Downloading $Url to $OutputFile..."
-        try {
-            $webClient = New-Object System.Net.WebClient
-            $webClient.DownloadFile($Url, $OutputFile)
-            
-            # Validate script content
-            if (!(Test-Path $OutputFile) -or (Get-Item $OutputFile).Length -eq 0) {
-                throw "Failed to download $Url or file is empty"
-            }
-        }
-        catch {
-            throw "Download error: $_"
-        }
-    }
-
-    # Step 1: Install HUST-EDR Agent and capture the Agent ID
-    Write-Host "`n[1/3] Installing HUST-EDR Agent..." -ForegroundColor Cyan
-
-    # Download the EDR agent script - SIMPLIFIED URL WITHOUT CA CERT PATH
-    $edrScriptPath = "$tempDir\install_edr_agent.ps1"
-    $edrScriptUrl = "http://$ServerHost/api/install/edr-agent-script?host=$gRPCHost&port=$gRPCPort&use_tls=$UseTLS&server_host=" + [Uri]::EscapeDataString($ServerHost)
-    if ($InsecureSkipVerify) {
-        $edrScriptUrl += "&insecure_skip_verify=true"
-    }
-
+function Invoke-ScriptDownload {
+    param(
+        [string]$Url,
+        [string]$OutputFile,
+        [string]$Description = "script"
+    )
+    
+    Write-Step "Downloading $Description from $Url..."
+    
     try {
-        Download-Script -Url $edrScriptUrl -OutputFile $edrScriptPath
+        $webClient = New-Object System.Net.WebClient
+        $webClient.DownloadFile($Url, $OutputFile)
         
-        # Create a log file to capture output
-        $edrLogFile = "$tempDir\edr_install.log"
+        # Validate script content
+        if (!(Test-Path $OutputFile) -or (Get-Item $OutputFile).Length -eq 0) {
+            throw "Failed to download $Url or file is empty"
+        }
         
-        # Execute the EDR agent script with simplified parameters
-        Write-Host "Executing HUST-EDR Agent installation script with TLS configuration..."
+        Write-Success "$Description downloaded successfully"
+        return $true
+    }
+    catch {
+        Write-Error "Download failed for $Description`: $_"
+        return $false
+    }
+}
+
+function Install-EDRAgent {
+    Write-Header "Installing HUST-EDR Agent [1/3]" "Cyan"
+    
+    try {
+        # Download EDR agent script
+        if (-not (Invoke-ScriptDownload -Url $EDR_SCRIPT_URL -OutputFile $EDR_SCRIPT_PATH -Description "EDR Agent script")) {
+            return $null
+        }
+        
+        # Execute EDR agent installation
+        Write-Step "Executing HUST-EDR Agent installation..."
         $scriptArgs = @{
-            gRPCHost = "$gRPCHost`:$gRPCPort"
-            UseTLS = $UseTLS
-            InsecureSkipVerify = $InsecureSkipVerify
+            gRPCHost = $gRPCHost
             ServerHost = $ServerHost
         }
         
-        $output = & powershell.exe -ExecutionPolicy Bypass -File $edrScriptPath @scriptArgs *>&1 | Tee-Object -FilePath $edrLogFile
-        
-        # Extract agent ID from various sources with updated paths
-        $edrAgentId = $null
-        
-        # First try to extract from test output
-        $testIdMatch = $output | Select-String -Pattern "Retrieved agent ID from test: ([0-9a-f\-]+)" | Select-Object -First 1
-        if ($testIdMatch) {
-            $edrAgentId = $testIdMatch.Matches.Groups[1].Value
-            Write-Host "Found agent ID from test output: $edrAgentId" -ForegroundColor Green
-        }
-        
-        # If not found, check the config file with new consolidated path
-        if (-not $edrAgentId) {
-            $configFilePath = "C:\Program Files\HUST-EDR\config.yaml"
-            if (Test-Path $configFilePath) {
-                Write-Host "Checking agent config file for ID: $configFilePath" -ForegroundColor Yellow
-                
-                # Wait longer for the new agent to register
-                Write-Host "Waiting for agent service to register with server..." -ForegroundColor Yellow
-                Start-Sleep -s 15
-                
-                # Read the config file with updated YAML format
-                $configContent = Get-Content -Path $configFilePath -Raw -ErrorAction SilentlyContinue
-                if ($configContent -match 'agent_id:\s*"?([^"\s\n]+)"?' -and $matches[1] -ne "" -and $matches[1] -ne "agent_id:") {
-                    $edrAgentId = $matches[1].Trim('"')
-                    Write-Host "Found agent ID in config file: $edrAgentId" -ForegroundColor Green
-                } else {
-                    # Check service logs for registration messages in consolidated directory
-                    $stdoutLogPath = "C:\Program Files\HUST-EDR\logs\edr-agent-stdout.log"
-                    $mainLogPath = "C:\Program Files\HUST-EDR\logs\edr-agent.log"
-                    
-                    foreach ($logPath in @($stdoutLogPath, $mainLogPath)) {
-                        if (Test-Path $logPath) {
-                            Write-Host "Checking service log file: $logPath" -ForegroundColor Yellow
-                            $logContent = Get-Content -Path $logPath -ErrorAction SilentlyContinue
-                            $idMatch = $logContent | Select-String -Pattern "Registered with server as agent ID: ([0-9a-f\-]+)" | Select-Object -First 1
-                            if ($idMatch) {
-                                $edrAgentId = $idMatch.Matches.Groups[1].Value
-                                Write-Host "Found agent ID in service log: $edrAgentId" -ForegroundColor Green
-                                break
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        
-        # If still not found, check final output patterns
-        if (-not $edrAgentId) {
-            $finalIdMatch = $output | Select-String -Pattern "Final Agent ID: ([0-9a-f\-]+)" | Select-Object -First 1
-            if ($finalIdMatch) {
-                $edrAgentId = $finalIdMatch.Matches.Groups[1].Value
-                Write-Host "Found agent ID from final output: $edrAgentId" -ForegroundColor Green
-            }
-        }
-        
-        if (-not $edrAgentId) {
-            Write-Host "Could not extract HUST-EDR Agent ID from any source. Please check $edrLogFile" -ForegroundColor Yellow
-            Write-Host "Installation will continue, but Winlogbeat may not have the correct agent ID." -ForegroundColor Yellow
-            # Continue with a placeholder ID that can be updated later
-            $edrAgentId = "PLACEHOLDER_AGENT_ID"
-        }
-        
-        Write-Host "HUST-EDR Agent installed successfully with ID: $edrAgentId" -ForegroundColor Green
-        
-    } catch {
-        Write-Host "Failed to install HUST-EDR Agent: $_" -ForegroundColor Red
-        return
-    }
-
-    # Step 2: Install Sysmon
-    Write-Host "`n[2/3] Installing Sysmon..." -ForegroundColor Cyan
-
-    # Download the Sysmon script
-    $sysmonScriptPath = "$tempDir\install_sysmon.ps1"
-    $sysmonScriptUrl = "http://$ServerHost/api/install/sysmon-script"
-
-    try {
-        Download-Script -Url $sysmonScriptUrl -OutputFile $sysmonScriptPath
-        
-        # Execute the Sysmon script
-        Write-Host "Executing Sysmon installation script..."
-        & powershell.exe -ExecutionPolicy Bypass -File $sysmonScriptPath
+        $output = & powershell.exe -ExecutionPolicy Bypass -File $EDR_SCRIPT_PATH @scriptArgs *>&1 | Tee-Object -FilePath $EDR_LOG_FILE
         
         if ($LASTEXITCODE -ne 0) {
-            Write-Host "Sysmon installation failed with exit code: $LASTEXITCODE" -ForegroundColor Red
-            return
+            Write-Error "EDR Agent installation failed with exit code: $LASTEXITCODE"
+            return $null
         }
         
-        Write-Host "Sysmon installed successfully!" -ForegroundColor Green
+        # Extract agent ID from various sources
+        $agentId = Get-AgentId -Output $output
         
-    } catch {
-        Write-Host "Failed to install Sysmon: $_" -ForegroundColor Red
-        return
-    }
-
-    # Step 3: Install Winlogbeat with EDR Agent ID
-    Write-Host "`n[3/3] Installing Winlogbeat..." -ForegroundColor Cyan
-
-    # Download the Winlogbeat configuration
-    $winlogbeatConfigPath = "$tempDir\winlogbeat.yml"
-    $winlogbeatConfigUrl = "http://$ServerHost/api/install/winlogbeat-config"
-
-    try {
-        Download-Script -Url $winlogbeatConfigUrl -OutputFile $winlogbeatConfigPath
-        
-        # Replace the EDR ID placeholder with the actual EDR Agent ID
-        $configContent = Get-Content -Path $winlogbeatConfigPath -Raw
-        $configContent = $configContent -replace "<edr agent id go there>", $edrAgentId
-        Set-Content -Path $winlogbeatConfigPath -Value $configContent
-        
-        Write-Host "Updated Winlogbeat configuration with HUST-EDR Agent ID: $edrAgentId" -ForegroundColor Green
-        
-        # Create a modified Winlogbeat script that uses our config
-        $winlogbeatScriptPath = "$tempDir\install_winlogbeat.ps1"
-        $winlogbeatScriptUrl = "http://$ServerHost/api/install/winlogbeat-script?host=$ServerHost"
-        
-        Download-Script -Url $winlogbeatScriptUrl -OutputFile $winlogbeatScriptPath
-        
-        # Modify the script to use our pre-configured winlogbeat.yml
-        $winlogbeatScript = Get-Content -Path $winlogbeatScriptPath -Raw
-        $winlogbeatScript = $winlogbeatScript -replace "Download-File -Url \`$configUrl -OutputFile \`$tempConfigFile", "Copy-Item -Path `"$winlogbeatConfigPath`" -Destination `"`$tempConfigFile`" -Force"
-        Set-Content -Path $winlogbeatScriptPath -Value $winlogbeatScript
-        
-        # Execute the Winlogbeat script
-        Write-Host "Executing Winlogbeat installation script..."
-        & powershell.exe -ExecutionPolicy Bypass -File $winlogbeatScriptPath -ServerHost $ServerHost
-        
-        Write-Host "Winlogbeat installed successfully!" -ForegroundColor Green
-        
-    } catch {
-        Write-Host "Failed to install Winlogbeat: $_" -ForegroundColor Red
-        return
-    }
-
-    # Clean up
-    Write-Host "`nCleaning up temporary files..."
-    Remove-Item -Path $tempDir -Recurse -Force -ErrorAction SilentlyContinue
-
-    # Final status report
-    Write-Host "`n" + "="*70 -ForegroundColor Green
-    Write-Host "HUST-EDR STACK INSTALLATION COMPLETE!" -ForegroundColor Green
-    Write-Host "="*70 -ForegroundColor Green
-
-    Write-Host "`nInstallation Summary:" -ForegroundColor Cyan
-    Write-Host "  HUST-EDR Agent ID: $edrAgentId" -ForegroundColor White
-    Write-Host "  TLS Enabled: $UseTLS" -ForegroundColor White
-    Write-Host "  Server Host: $ServerHost" -ForegroundColor White
-    Write-Host "  All components have been installed and configured successfully." -ForegroundColor White
-    
-    # Configuration verification
-    Write-Host "`nConfiguration Files:" -ForegroundColor Yellow
-    $configFilePath = "C:\Program Files\HUST-EDR\config.yaml"
-    if (Test-Path $configFilePath) {
-        Write-Host "  ✓ HUST-EDR Agent Config: $configFilePath" -ForegroundColor Green
-    } else {
-        Write-Host "  ✗ HUST-EDR Agent Config: Not Found" -ForegroundColor Red
-    }
-    
-    $winlogbeatConfigPath = "C:\Program Files\Winlogbeat\winlogbeat.yml"
-    if (Test-Path $winlogbeatConfigPath) {
-        Write-Host "  ✓ Winlogbeat Config: $winlogbeatConfigPath" -ForegroundColor Green
-    } else {
-        Write-Host "  ✗ Winlogbeat Config: Not Found" -ForegroundColor Red
-    }
-    
-    # Service status check
-    Write-Host "`nService Status:" -ForegroundColor Yellow
-    $services = @("HustEDRAgent", "Sysmon", "Winlogbeat")
-    foreach ($serviceName in $services) {
-        $service = Get-Service $serviceName -ErrorAction SilentlyContinue
-        if ($service) {
-            $status = $service.Status
-            if ($status -eq "Running") {
-                Write-Host "  ✓ $serviceName`: $status" -ForegroundColor Green
-            } else {
-                Write-Host "  ⚠ $serviceName`: $status" -ForegroundColor Yellow
-            }
-        } else {
-            Write-Host "  ✗ $serviceName`: Not Found" -ForegroundColor Red
+        if ($agentId) {
+            Write-Success "HUST-EDR Agent installed successfully with ID: $agentId"
+            return $agentId
+        }
+        else {
+            Write-Warning "Could not extract HUST-EDR Agent ID. Check log: $EDR_LOG_FILE"
+            return "PLACEHOLDER_AGENT_ID"
         }
     }
-
-    # Final instructions
-    Write-Host "`nNext Steps:" -ForegroundColor Cyan
-    Write-Host "  1. Verify all services are running properly" -ForegroundColor White
-    Write-Host "  2. Check HUST-EDR logs: Get-Content 'C:\Program Files\HUST-EDR\logs\edr-agent.log' -Tail 20" -ForegroundColor White
-    Write-Host "  3. Monitor the HUST-EDR dashboard for agent connectivity" -ForegroundColor White
-    Write-Host "  4. Review Elasticsearch for incoming log data" -ForegroundColor White
-
-    Write-Host "`n" + "="*70 -ForegroundColor Green
+    catch {
+        Write-Error "Failed to install HUST-EDR Agent: $_"
+        return $null
+    }
 }
 
-# Auto-execute if not dot-sourced
-if ($MyInvocation.InvocationName -ne ".") {
-    # Parse parameters for the simplified TLS options
-    param(
-        [string]$ServerHost = "192.168.133.145:5000",
-        [string]$gRPCHost = "192.168.133.145",
-        [string]$gRPCPort = "50051",
-        [string]$UseTLS = "true",
-        [bool]$InsecureSkipVerify = $false
+function Get-AgentId {
+    param([array]$Output)
+    
+    Write-Step "Extracting agent ID from installation output..."
+    
+    # Try multiple extraction methods
+    $extractionMethods = @(
+        { param($output) $output | Select-String -Pattern "Retrieved agent ID from test: ([0-9a-f\-]+)" | Select-Object -First 1 },
+        { param($output) $output | Select-String -Pattern "Final Agent ID: ([0-9a-f\-]+)" | Select-Object -First 1 }
     )
     
-    # Build script arguments
-    $scriptArgs = @{
-        ServerHost = $ServerHost
-        gRPCHost = $gRPCHost
-        gRPCPort = $gRPCPort
-        UseTLS = $UseTLS
-        InsecureSkipVerify = $InsecureSkipVerify
+    foreach ($method in $extractionMethods) {
+        $match = & $method $Output
+        if ($match) {
+            $agentId = $match.Matches.Groups[1].Value
+            Write-Success "Found agent ID from output: $agentId"
+            return $agentId
+        }
     }
     
-    Install-EDRStack @scriptArgs
+    # Check config file
+    if (Test-Path $EDR_CONFIG_PATH) {
+        Write-Step "Checking agent config file for ID..."
+        Start-Sleep -Seconds 15  # Wait for agent registration
+        
+        $configContent = Get-Content -Path $EDR_CONFIG_PATH -Raw -ErrorAction SilentlyContinue
+        if ($configContent -match 'agent_id:\s*"?([^"\s\n]+)"?' -and $matches[1] -ne "" -and $matches[1] -ne "agent_id:") {
+            $agentId = $matches[1].Trim('"')
+            Write-Success "Found agent ID in config file: $agentId"
+            return $agentId
+        }
+    }
+    
+    # Check service logs
+    $logPaths = @(
+        "$EDR_LOG_PATH\stdout.log",
+        "$EDR_LOG_PATH\edr-agent.log"
+    )
+    
+    foreach ($logPath in $logPaths) {
+        if (Test-Path $logPath) {
+            Write-Step "Checking service log: $logPath"
+            $logContent = Get-Content -Path $logPath -ErrorAction SilentlyContinue
+            $idMatch = $logContent | Select-String -Pattern "Registered with server as agent ID: ([0-9a-f\-]+)" | Select-Object -First 1
+            if ($idMatch) {
+                $agentId = $idMatch.Matches.Groups[1].Value
+                Write-Success "Found agent ID in service log: $agentId"
+                return $agentId
+            }
+        }
+    }
+    
+    return $null
+}
+
+function Install-Sysmon {
+    Write-Header "Installing Sysmon [2/3]" "Cyan"
+    
+    try {
+        # Download Sysmon script
+        if (-not (Invoke-ScriptDownload -Url $SYSMON_SCRIPT_URL -OutputFile $SYSMON_SCRIPT_PATH -Description "Sysmon script")) {
+            return $false
+        }
+        
+        # Execute Sysmon installation
+        Write-Step "Executing Sysmon installation..."
+        & powershell.exe -ExecutionPolicy Bypass -File $SYSMON_SCRIPT_PATH
+        
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error "Sysmon installation failed with exit code: $LASTEXITCODE"
+            return $false
+        }
+        
+        Write-Success "Sysmon installed successfully!"
+        return $true
+    }
+    catch {
+        Write-Error "Failed to install Sysmon: $_"
+        return $false
+    }
+}
+
+function Install-Winlogbeat {
+    param([string]$AgentId)
+    
+    Write-Header "Installing Winlogbeat [3/3]" "Cyan"
+    
+    try {
+        # Download Winlogbeat configuration
+        if (-not (Invoke-ScriptDownload -Url $WINLOGBEAT_CONFIG_URL -OutputFile $WINLOGBEAT_CONFIG_FILE -Description "Winlogbeat configuration")) {
+            return $false
+        }
+        
+        # Update configuration with agent ID
+        Write-Step "Updating Winlogbeat configuration with agent ID: $AgentId"
+        $configContent = Get-Content -Path $WINLOGBEAT_CONFIG_FILE -Raw
+        $configContent = $configContent -replace "<edr agent id go there>", $AgentId
+        Set-Content -Path $WINLOGBEAT_CONFIG_FILE -Value $configContent
+        
+        # Download and modify Winlogbeat script
+        if (-not (Invoke-ScriptDownload -Url $WINLOGBEAT_SCRIPT_URL -OutputFile $WINLOGBEAT_SCRIPT_PATH -Description "Winlogbeat script")) {
+            return $false
+        }
+        
+        # Modify script to use our pre-configured config
+        $scriptContent = Get-Content -Path $WINLOGBEAT_SCRIPT_PATH -Raw
+        $scriptContent = $scriptContent -replace "Invoke-FileDownload -Url \`$CONFIG_URL -OutputFile \`$TEMP_CONFIG_FILE -Description `"Winlogbeat configuration`"", "Copy-Item -Path `"$WINLOGBEAT_CONFIG_FILE`" -Destination `"`$TEMP_CONFIG_FILE`" -Force"
+        Set-Content -Path $WINLOGBEAT_SCRIPT_PATH -Value $scriptContent
+        
+        # Execute Winlogbeat installation
+        Write-Step "Executing Winlogbeat installation..."
+        & powershell.exe -ExecutionPolicy Bypass -File $WINLOGBEAT_SCRIPT_PATH -ServerHost $ServerHost
+        
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error "Winlogbeat installation failed with exit code: $LASTEXITCODE"
+            return $false
+        }
+        
+        Write-Success "Winlogbeat installed successfully!"
+        return $true
+    }
+    catch {
+        Write-Error "Failed to install Winlogbeat: $_"
+        return $false
+    }
+}
+
+function Test-ServiceStatus {
+    param([string]$ServiceName)
+    
+    $service = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
+    if ($service) {
+        return @{
+            Exists = $true
+            Status = $service.Status
+            IsRunning = ($service.Status -eq "Running")
+        }
+    }
+    else {
+        return @{
+            Exists = $false
+            Status = "Not Found"
+            IsRunning = $false
+        }
+    }
+}
+
+function Show-ServiceStatus {
+    Write-Header "Service Status Check" "Yellow"
+    
+    $allRunning = $true
+    foreach ($component in $STACK_COMPONENTS) {
+        $status = Test-ServiceStatus -ServiceName $component.ServiceName
+        
+        if ($status.Exists) {
+            if ($status.IsRunning) {
+                Write-Host "  ✓ $($component.Name): $($status.Status)" -ForegroundColor Green
+            }
+            else {
+                Write-Host "  ⚠ $($component.Name): $($status.Status)" -ForegroundColor Yellow
+                $allRunning = $false
+            }
+        }
+        else {
+            Write-Host "  ✗ $($component.Name): $($status.Status)" -ForegroundColor Red
+            $allRunning = $false
+        }
+    }
+    
+    return $allRunning
+}
+
+function Show-ConfigurationStatus {
+    Write-Header "Configuration Files Check" "Yellow"
+    
+    $configFiles = @(
+        @{ Name = "HUST-EDR Agent Config"; Path = $EDR_CONFIG_PATH },
+        @{ Name = "Winlogbeat Config"; Path = $WINLOGBEAT_CONFIG_PATH }
+    )
+    
+    foreach ($config in $configFiles) {
+        if (Test-Path $config.Path) {
+            Write-Host "  ✓ $($config.Name): $($config.Path)" -ForegroundColor Green
+        }
+        else {
+            Write-Host "  ✗ $($config.Name): Not Found" -ForegroundColor Red
+        }
+    }
+}
+
+function Show-InstallationSummary {
+    param([string]$AgentId, [bool]$AllServicesRunning)
+    
+    Write-Header "HUST-EDR STACK INSTALLATION COMPLETE!" "Green"
+    
+    Write-Host "Installation Summary:" -ForegroundColor Cyan
+    Write-Host "  HUST-EDR Agent ID: $AgentId" -ForegroundColor White
+    Write-Host "  TLS Enabled: $UseTLS" -ForegroundColor White
+    Write-Host "  Server Host: $ServerHost" -ForegroundColor White
+    
+    if ($AllServicesRunning) {
+        Write-Host "  Status: All components installed and running successfully" -ForegroundColor Green
+    }
+    else {
+        Write-Host "  Status: Installation completed with some service issues" -ForegroundColor Yellow
+    }
+    
+    Write-Header "Next Steps" "Cyan"
+    Write-Host "  1. Verify all services are running properly" -ForegroundColor White
+    Write-Host "  2. Check HUST-EDR logs: Get-Content '$EDR_LOG_PATH\edr-agent.log' -Tail 20" -ForegroundColor White
+    Write-Host "  3. Monitor the HUST-EDR dashboard for agent connectivity" -ForegroundColor White
+    Write-Host "  4. Review Elasticsearch for incoming log data" -ForegroundColor White
+}
+
+function Invoke-Cleanup {
+    Write-Step "Cleaning up temporary files..."
+    
+    try {
+        if (Test-Path $TEMP_DIR) {
+            Remove-Item -Path $TEMP_DIR -Recurse -Force -ErrorAction SilentlyContinue
+        }
+        Write-Success "Temporary files cleaned up"
+    }
+    catch {
+        Write-Warning "Could not clean up some temporary files: $_"
+    }
+}
+
+#==============================================================================
+# Main Installation Process
+#==============================================================================
+
+function Install-EDRStack {
+    Write-Header "$SCRIPT_NAME v$SCRIPT_VERSION"
+    Write-Host "Installing complete EDR stack to system" -ForegroundColor Yellow
+    
+    Write-Host "Configuration:" -ForegroundColor Cyan
+    Write-Host "  Server Host: $ServerHost" -ForegroundColor White
+    Write-Host "  gRPC Host: $gRPCHost" -ForegroundColor White
+    Write-Host "  Use TLS: $UseTLS" -ForegroundColor White
+    Write-Host "  Insecure Skip Verify: $InsecureSkipVerify" -ForegroundColor White
+    
+    # Check administrator privileges
+    if (-not (Test-Administrator)) {
+        Write-Error "This script requires administrator privileges. Please run as administrator."
+        return $false
+    }
+    
+    # Initialize environment
+    Initialize-Environment
+    
+    # Install components in sequence
+    $agentId = Install-EDRAgent
+    if (-not $agentId) {
+        Write-Error "EDR Agent installation failed. Aborting stack installation."
+        return $false
+    }
+    
+    if (-not (Install-Sysmon)) {
+        Write-Error "Sysmon installation failed. Aborting stack installation."
+        return $false
+    }
+    
+    if (-not (Install-Winlogbeat -AgentId $agentId)) {
+        Write-Error "Winlogbeat installation failed. Aborting stack installation."
+        return $false
+    }
+    
+    # Verify installation
+    Show-ConfigurationStatus
+    $allServicesRunning = Show-ServiceStatus
+    
+    # Clean up
+    Invoke-Cleanup
+    
+    # Show summary
+    Show-InstallationSummary -AgentId $agentId -AllServicesRunning $allServicesRunning
+    
+    return $true
+}
+
+# Execute installation
+$installResult = Install-EDRStack
+if ($installResult) {
+    Write-Host "`nEDR Stack installation completed successfully!" -ForegroundColor Green
+    exit 0
+}
+else {
+    Write-Host "`nEDR Stack installation failed!" -ForegroundColor Red
+    exit 1
 } 
