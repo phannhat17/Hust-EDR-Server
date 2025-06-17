@@ -223,14 +223,6 @@ function Show-InstallationSummary {
     Write-Host "Kibana Certificate: $CERT1_FILE" -ForegroundColor White
     Write-Host "Elasticsearch Certificate: $CERT2_FILE" -ForegroundColor White
     Write-Host "Environment Variable: WINLOGBEAT_HOME = $WINLOGBEAT_DIR" -ForegroundColor White
-    
-    Write-Header "Management Commands" "Cyan"
-    Write-Host "Start Service:    Start-Service -Name '$SERVICE_NAME'" -ForegroundColor White
-    Write-Host "Stop Service:     Stop-Service -Name '$SERVICE_NAME'" -ForegroundColor White
-    Write-Host "Service Status:   Get-Service -Name '$SERVICE_NAME'" -ForegroundColor White
-    Write-Host "View Config:      Get-Content '$CONFIG_FILE'" -ForegroundColor White
-    Write-Host "Test Connection:  & '$WINLOGBEAT_EXE' test config" -ForegroundColor White
-    Write-Host "View Logs:        Get-EventLog -LogName Application -Source winlogbeat -Newest 10" -ForegroundColor White
 }
 
 #==============================================================================

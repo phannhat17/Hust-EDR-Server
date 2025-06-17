@@ -259,14 +259,7 @@ function Show-InstallationSummary {
     Write-Host "CA Certificate: $CA_CERT_FILE" -ForegroundColor White
     Write-Host "Service Name: $SERVICE_NAME" -ForegroundColor White
     Write-Host "Server Address: $gRPCHost" -ForegroundColor White
-    
-    Write-Header "Management Commands" "Cyan"
-    Write-Host "Start Service:    Start-Service -Name '$SERVICE_NAME'" -ForegroundColor White
-    Write-Host "Stop Service:     Stop-Service -Name '$SERVICE_NAME'" -ForegroundColor White
-    Write-Host "Service Status:   Get-Service -Name '$SERVICE_NAME'" -ForegroundColor White
-    Write-Host "View Logs:        Get-Content '$LOGS_DIR\stderr.log' -Tail 20" -ForegroundColor White
-    Write-Host "Manual Run:       Set-Location '$INSTALL_DIR'; & '.\edr-agent.exe' --config '$CONFIG_FILE'" -ForegroundColor White
-}
+    }
 
 #==============================================================================
 # Main Installation Process
@@ -384,10 +377,3 @@ Show-InstallationSummary
 
 Write-Host "`nHUST EDR Agent installation completed successfully!" -ForegroundColor Green
 Write-Host "The agent should now be running and connecting to the server." -ForegroundColor Yellow
-
-Write-Host "`n=== Troubleshooting ===" -ForegroundColor Cyan
-Write-Host "If the service fails to start, check the logs:" -ForegroundColor White
-Write-Host "1. Service logs: Get-Content '$LOGS_DIR\stderr.log' -Tail 20" -ForegroundColor White
-Write-Host "2. Agent logs: Get-Content '$LOGS_DIR\edr-agent.log' -Tail 20" -ForegroundColor White
-Write-Host "3. Manual test: Set-Location '$INSTALL_DIR'; & '.\edr-agent.exe' --config '$CONFIG_FILE'" -ForegroundColor White
-Write-Host "4. Check config: Get-Content '$CONFIG_FILE'" -ForegroundColor White 

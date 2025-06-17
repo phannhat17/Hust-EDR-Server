@@ -173,12 +173,6 @@ function Show-InstallationSummary {
     Write-Host "Configuration File: $CONFIG_FILE" -ForegroundColor White
     Write-Host "Sysmon Executable: $SYSMON_EXE" -ForegroundColor White
     Write-Host "Environment Variable: SYSMON_HOME = $SYSMON_DIR" -ForegroundColor White
-    
-    Write-Header "Management Commands" "Cyan"
-    Write-Host "View Config:      Get-Content '$CONFIG_FILE'" -ForegroundColor White
-    Write-Host "Check Service:    Get-Service -Name 'Sysmon64'" -ForegroundColor White
-    Write-Host "View Events:      Get-WinEvent -LogName 'Microsoft-Windows-Sysmon/Operational' -MaxEvents 10" -ForegroundColor White
-    Write-Host "Uninstall:        & '$SYSMON_EXE' -u" -ForegroundColor White
 }
 
 #==============================================================================
