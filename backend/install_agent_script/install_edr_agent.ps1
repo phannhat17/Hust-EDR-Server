@@ -18,9 +18,9 @@ if (-NOT ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdent
 
 # Define installation paths
 $InstallDir = "C:\Program Files\HUST-EDR-Agent"
-$DataDir = "$InstallDir\data"
+$DataDir = "C:\ProgramData\HUST-EDR-Agent"
 $LogsDir = "$InstallDir\logs"
-$ConfigFile = "$InstallDir\config.yaml"
+$ConfigFile = "$DataDir\config.yaml"
 $AgentBinary = "$InstallDir\edr-agent.exe"
 $CACertFile = "$DataDir\ca.crt"
 
@@ -81,7 +81,7 @@ try {
 Write-Host "Downloading CA certificate..." -ForegroundColor Yellow
 try {
     # Try to download from the server's certificate endpoint
-    $CertUrl = "http://$ServerHost/api/install/kibana-cert"
+    $CertUrl = "http://$ServerHost/api/install/ca-cert"
     Download-File -Url $CertUrl -OutputFile $CACertFile
     Write-Host "CA certificate downloaded successfully" -ForegroundColor Green
 } catch {
@@ -97,48 +97,54 @@ try {
 
 # Create configuration file with proper Windows path formatting
 Write-Host "Creating configuration file..." -ForegroundColor Yellow
+# Use forward slashes for paths in YAML to avoid escape character issues
+$CACertPath = $CACertFile.Replace('\', '/')
+$HostsFilePath = "C:/Windows/System32/drivers/etc/hosts"
+$LogFilePath = ($LogsDir + "/edr-agent.log").Replace('\', '/')
+$DataDirPath = $DataDir.Replace('\', '/')
+
 $ConfigContent = @"
 # EDR Agent Configuration File
 # This file contains all configuration options for the EDR Agent
 # You can customize these values according to your environment
 
 # Server Configuration
-server_address: "$gRPCHost"  # EDR server address (host:port)
-use_tls: true                      # Enable TLS encryption for server communication
+server_address: "$gRPCHost"
+use_tls: true
 
 # TLS/Certificate Configuration (only applies when use_tls is true)
-ca_cert_path: "C:\\Program Files\\HUST-EDR-Agent\\data\\ca.crt"               # Path to CA certificate for server verification (leave empty to use system CA)
-insecure_skip_verify: false          # Skip certificate verification (not recommended for production)
+ca_cert_path: "$CACertPath"
+insecure_skip_verify: false
 
 # Agent Identification
-agent_id: ""                       # Agent ID (leave empty for auto-generation)
-agent_version: "1.0.0"            # Agent version
+agent_id: ""
+agent_version: "1.0.0"
 
 # File Paths
-log_file: ""                       # Log file path (leave empty for console output)
-data_dir: "data"                   # Directory for agent data storage
+log_file: "$LogFilePath"
+data_dir: "$DataDirPath"
 
 # Logging Configuration
-log_level: "info"                  # Log level: debug, info, warn, error
-log_format: "console"              # Log format: console, json
+log_level: "info"
+log_format: "console"
 
 # Timing Configuration (in minutes)
-scan_interval: 5                   # IOC scan interval
-metrics_interval: 10               # System metrics reporting interval
+scan_interval: 5
+metrics_interval: 10
 
 # Connection Configuration (in seconds)
-connection_timeout: 30             # Connection timeout
-reconnect_delay: 5                 # Delay between reconnection attempts
-max_reconnect_delay: 60            # Maximum reconnection delay
-ioc_update_delay: 3                # Delay before requesting IOC updates
-shutdown_timeout: 500              # Shutdown timeout (milliseconds)
+connection_timeout: 30
+reconnect_delay: 5
+max_reconnect_delay: 60
+ioc_update_delay: 3
+shutdown_timeout: 500
 
 # System Monitoring Configuration
-cpu_sample_duration: 500           # CPU sampling duration (milliseconds)
+cpu_sample_duration: 500
 
 # Windows-specific Configuration
-hosts_file_path: "C:\\Windows\\System32\\drivers\\etc\\hosts"
-blocked_ip_redirect: "127.0.0.1"   # IP address to redirect blocked domains to
+hosts_file_path: "$HostsFilePath"
+blocked_ip_redirect: "127.0.0.1"
 
 # Certificate Verification Notes:
 # - If ca_cert_path is specified, the agent will use this CA certificate to verify the server
@@ -216,9 +222,8 @@ try {
     Write-Host "Installing service with NSSM..." -ForegroundColor Yellow
     & $nssmExe install $ServiceName $AgentBinary
     
-    # Set parameters with proper escaping for paths with spaces
-    $ConfigParam = "--config `"$ConfigFile`""
-    & $nssmExe set $ServiceName AppParameters $ConfigParam
+    # Set parameters - use proper argument format for NSSM
+    & $nssmExe set $ServiceName AppParameters "--config `"$ConfigFile`""
     
     & $nssmExe set $ServiceName DisplayName $ServiceDisplayName
     & $nssmExe set $ServiceName Description $ServiceDescription
@@ -227,7 +232,7 @@ try {
     
     Write-Host "NSSM Configuration:" -ForegroundColor Cyan
     Write-Host "  Binary: $AgentBinary" -ForegroundColor White
-    Write-Host "  Parameters: $ConfigParam" -ForegroundColor White
+    Write-Host "  Parameters: --config `"$ConfigFile`"" -ForegroundColor White
     Write-Host "  Directory: $InstallDir" -ForegroundColor White
     
     # Verify NSSM configuration
@@ -246,6 +251,10 @@ try {
     & $nssmExe set $ServiceName AppRotateOnline 1
     & $nssmExe set $ServiceName AppRotateSeconds 86400
     & $nssmExe set $ServiceName AppRotateBytes 1048576
+    
+    # Set service restart options
+    & $nssmExe set $ServiceName AppExit Default Restart
+    & $nssmExe set $ServiceName AppRestartDelay 5000
     
     Write-Host "Windows Service created successfully with NSSM" -ForegroundColor Green
 } catch {
@@ -285,13 +294,28 @@ try {
 Write-Host "Starting EDR Agent service..." -ForegroundColor Yellow
 try {
     Start-Service -Name $ServiceName
-    Start-Sleep -Seconds 3
+    Start-Sleep -Seconds 5
     
     $ServiceStatus = Get-Service -Name $ServiceName
     if ($ServiceStatus.Status -eq "Running") {
         Write-Host "EDR Agent service started successfully" -ForegroundColor Green
     } else {
         Write-Warning "EDR Agent service is not running. Status: $($ServiceStatus.Status)"
+        
+        # Try to get more information about why the service failed
+        Write-Host "Checking service logs for more information..." -ForegroundColor Yellow
+        Start-Sleep -Seconds 2
+        
+        if (Test-Path "$LogsDir\stderr.log") {
+            Write-Host "Last 10 lines of stderr log:" -ForegroundColor Yellow
+            Get-Content "$LogsDir\stderr.log" -Tail 10 -ErrorAction SilentlyContinue
+        }
+        
+        if (Test-Path "$LogsDir\stdout.log") {
+            Write-Host "Last 10 lines of stdout log:" -ForegroundColor Yellow
+            Get-Content "$LogsDir\stdout.log" -Tail 10 -ErrorAction SilentlyContinue
+        }
+        
         Write-Host "You can start it manually with: Start-Service -Name '$ServiceName'" -ForegroundColor Yellow
     }
 } catch {
@@ -325,9 +349,15 @@ Write-Host "Stop Service:     Stop-Service -Name '$ServiceName'" -ForegroundColo
 Write-Host "Service Status:   Get-Service -Name '$ServiceName'" -ForegroundColor White
 Write-Host "View Stdout Log:  Get-Content '$LogsDir\stdout.log' -Tail 20" -ForegroundColor White
 Write-Host "View Stderr Log:  Get-Content '$LogsDir\stderr.log' -Tail 20" -ForegroundColor White
-Write-Host "Manual Run:       & '$AgentBinary' --config '$ConfigFile'" -ForegroundColor White
-Write-Host "Manual Run (CD):  cd '$InstallDir'; .\edr-agent.exe --config '$ConfigFile'" -ForegroundColor White
-Write-Host "Remove Service:   nssm remove '$ServiceName' confirm" -ForegroundColor White
+Write-Host "Manual Run:       Set-Location '$InstallDir'; & '.\edr-agent.exe' --config '$ConfigFile'" -ForegroundColor White
+Write-Host "Remove Service:   & '$nssmExe' remove '$ServiceName' confirm" -ForegroundColor White
 
 Write-Host "`nHUST EDR Agent installation completed successfully!" -ForegroundColor Green
-Write-Host "The agent should now be running and connecting to the server." -ForegroundColor Yellow 
+Write-Host "The agent should now be running and connecting to the server." -ForegroundColor Yellow
+
+Write-Host "`n=== Troubleshooting ===" -ForegroundColor Cyan
+Write-Host "If the service fails to start, check the logs:" -ForegroundColor White
+Write-Host "1. Service logs: Get-Content '$LogsDir\stderr.log' -Tail 20" -ForegroundColor White
+Write-Host "2. Agent logs: Get-Content '$LogsDir\edr-agent.log' -Tail 20" -ForegroundColor White
+Write-Host "3. Manual test: Set-Location '$InstallDir'; & '.\edr-agent.exe' --config '$ConfigFile'" -ForegroundColor White
+Write-Host "4. Check config: Get-Content '$ConfigFile'" -ForegroundColor White 
