@@ -675,17 +675,12 @@ class EDRServicer(agent_pb2_grpc.EDRServiceServicer):
                     message="DELETE_FILE command missing required 'path' parameter"
                 )
             
-            # Check if agent is online
+            # Check if agent is online - only check status field for all commands
             agent_status = agent.get('status', 'UNKNOWN')
             is_ioc_update = command.type == agent_pb2.CommandType.UPDATE_IOCS
 
-            # For IOC updates, only check the status field
-            if is_ioc_update:
-                agent_online = agent_status == 'ONLINE'
-            else:
-                # For other commands, use the timestamp check
-                current_time = int(time.time())
-                agent_online = (current_time - agent.get('last_seen', 0)) < 300  # 5 minutes
+            # For all commands, only check the status field
+            agent_online = agent_status == 'ONLINE'
             
             if not agent_online:
                 return agent_pb2.SendCommandResponse(
@@ -693,44 +688,22 @@ class EDRServicer(agent_pb2_grpc.EDRServiceServicer):
                     message=f"Agent {agent_id} is offline (status: {agent_status}). Cannot send command directly."
                 )
             
-            # Check for active stream
+            # Add command to queue - allow queuing for all commands when agent is ONLINE
             with self.stream_lock:
-                stream_active = agent_id in self.active_streams and self.active_streams[agent_id] is not None
-                if not stream_active:
-                    # For IOC updates, queue anyway if the agent is ONLINE in database
-                    if is_ioc_update:
-                        command.timestamp = int(time.time())
-                        if agent_id not in self.pending_commands:
-                            self.pending_commands[agent_id] = []
-                        self.pending_commands[agent_id].append(command)
-                        
-                        logger.info(f"Queued IOC update for ONLINE agent {agent_id} without active stream")
-                        return agent_pb2.SendCommandResponse(
-                            success=True,
-                            message=f"IOC update queued for agent {agent_id}"
-                        )
-                    else:
-                        return agent_pb2.SendCommandResponse(
-                            success=False, 
-                            message=f"Agent {agent_id} is online but has no active command stream."
-                        )
-                
-                # Add command to queue
+                # Add command to queue regardless of active stream status
                 command.timestamp = int(time.time())
                 if agent_id not in self.pending_commands:
                     self.pending_commands[agent_id] = []
                 self.pending_commands[agent_id].append(command)
+                
+                # Log appropriate message based on stream status
+                stream_active = agent_id in self.active_streams and self.active_streams[agent_id] is not None
+                if stream_active:
+                    logger.info(f"Queued {cmd_type_name} command for agent {agent_id} with active stream")
+                else:
+                    logger.info(f"Queued {cmd_type_name} command for ONLINE agent {agent_id} without active stream - will be delivered when stream reconnects")
             
-            # For IOC updates, don't wait for a response since they're handled asynchronously
-            if is_ioc_update:
-                logger.info(f"Queued IOC update command for agent {agent_id} (command ID: {command.command_id})")
-                return agent_pb2.SendCommandResponse(
-                    success=True,
-                    message=f"IOC update command queued for delivery to agent {agent_id}"
-                )
-            
-            # For other commands, also don't wait for response - just queue and return success
-            logger.info(f"Queued {cmd_type_name} command for agent {agent_id} (command ID: {command.command_id})")
+            # Return success for all commands - they are now queued
             return agent_pb2.SendCommandResponse(
                 success=True,
                 message=f"{cmd_type_name} command queued for delivery to agent {agent_id}"
