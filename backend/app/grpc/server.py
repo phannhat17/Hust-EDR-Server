@@ -146,7 +146,7 @@ class EDRServicer(agent_pb2_grpc.EDRServiceServicer):
         timestamp = request.timestamp
         status = request.status
         
-        print(f"[DEBUG] UpdateStatus called: agent={agent_id}, status={status}")
+        # print(f"[DEBUG] UpdateStatus called: agent={agent_id}, status={status}")
         logger.info(f"Status update from agent {agent_id}: {status}")
         
         # Check if agent exists
@@ -437,14 +437,14 @@ class EDRServicer(agent_pb2_grpc.EDRServiceServicer):
         """Process incoming messages from the agent in a separate thread."""
         try:
             for message in request_iterator:
-                print(f"[DEBUG] Received message type: {message.message_type}")
+                # print(f"[DEBUG] Received message type: {message.message_type}")
                 if message.message_type == agent_pb2.MessageType.AGENT_STATUS:
                     # Handle explicit status update (ONLINE/OFFLINE)
-                    print(f"[DEBUG] Processing AGENT_STATUS message from {agent_id}")
+                    # print(f"[DEBUG] Processing AGENT_STATUS message from {agent_id}")
                     status_req = message.status
                     status = status_req.status
                     
-                    print(f"[DEBUG] Status extracted: {status}")
+                    # print(f"[DEBUG] Status extracted: {status}")
                     logger.info(f"Explicit status update from agent {agent_id}: {status}")
                     
                     # Check if agent exists
@@ -467,10 +467,10 @@ class EDRServicer(agent_pb2_grpc.EDRServiceServicer):
                         self.storage.save_agent(agent_id, agent)
                         # Force save for status updates to ensure immediate persistence
                         self.storage.force_save()
-                        print(f"[DEBUG] Successfully saved agent {agent_id} with status {status}")
+                        # print(f"[DEBUG] Successfully saved agent {agent_id} with status {status}")
                         logger.info(f"Updated agent {agent_id} status to {status}")
                     else:
-                        print(f"[DEBUG] Unknown agent {agent_id} for status update")
+                        # print(f"[DEBUG] Unknown agent {agent_id} for status update")
                         logger.warning(f"Received status update for unknown agent {agent_id}")
                 
                 elif message.message_type == agent_pb2.MessageType.AGENT_RUNNING:
