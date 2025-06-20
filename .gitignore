@@ -34,5 +34,6 @@ config.yaml
 
 .sonar/
 
+cloc.sh
 sonar-project.properties
 edr-agent.exe

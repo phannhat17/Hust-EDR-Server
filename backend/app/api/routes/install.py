@@ -8,25 +8,26 @@ install_bp = Blueprint('install', __name__)
 # Path directories
 SCRIPT_DIR = config.SCRIPT_DIR
 CERT_DIR = config.CERT_DIR
+CERT_TYPE = 'application/x-x509-ca-cert'
 
 # Certificate routes
 @install_bp.route('/ca-cert', methods=['GET'])
 def get_ca_cert():
     """Serve the CA certificate file."""
     cert_path = os.path.join(CERT_DIR, 'ca.crt')
-    return send_file(cert_path, mimetype='application/x-x509-ca-cert')
+    return send_file(cert_path, mimetype=CERT_TYPE)
 
 @install_bp.route('/kibana-cert', methods=['GET'])
 def get_kibana_cert():
     """Serve the Kibana certificate file."""
     cert_path = os.path.join(CERT_DIR, 'kibana.crt')
-    return send_file(cert_path, mimetype='application/x-x509-ca-cert')
+    return send_file(cert_path, mimetype=CERT_TYPE)
 
 @install_bp.route('/elasticsearch-cert', methods=['GET'])
 def get_elasticsearch_cert():
     """Serve the Elasticsearch certificate file."""
     cert_path = os.path.join(CERT_DIR, 'elasticsearch.crt')
-    return send_file(cert_path, mimetype='application/x-x509-ca-cert')
+    return send_file(cert_path, mimetype=CERT_TYPE)
 
 # Sysmon routes
 @install_bp.route('/sysmon-script', methods=['GET'])
@@ -113,7 +114,7 @@ def get_edr_stack_script():
 def get_edr_install_oneliner():
     """Generate a one-liner PowerShell command to install the complete EDR stack."""
     host = request.host
-    oneliner = f'''powershell -Command "Invoke-WebRequest -Uri 'http://192.168.133.145:5000/api/install/edr-stack-script' -UseBasicParsing | Invoke-Expression"
+    oneliner = f'''powershell -Command "Invoke-WebRequest -Uri 'http://{host}/api/install/edr-stack-script' -UseBasicParsing | Invoke-Expression"
 '''
     response = make_response(oneliner)
     response.headers['Content-Type'] = 'text/plain'
