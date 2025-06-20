@@ -422,15 +422,9 @@ func (h *CommandHandler) handleNetworkIsolate(params map[string]string) (string,
 		}
 	}
 
-	// Use Windows Firewall to isolate
-	// First, block all inbound connections
-	inboundCmd := exec.Command("netsh", "advfirewall", "set", "allprofiles", "firewallpolicy", "blockinbound,blockoutbound")
-	_, err := inboundCmd.CombinedOutput()
-	if err != nil {
-		return "", fmt.Errorf("failed to set firewall policy: %v", err)
-	}
-	
-	// Then add rules for allowed IPs
+	log.Printf("Network isolation: allowing IPs: %s", allowedIPs)
+
+	// FIRST: Add exception rules for allowed IPs BEFORE blocking all traffic
 	if allowedIPs != "" {
 		allowedIPList := strings.Split(allowedIPs, ",")
 		for _, ip := range allowedIPList {
@@ -439,50 +433,71 @@ func (h *CommandHandler) handleNetworkIsolate(params map[string]string) (string,
 				continue
 			}
 			
+			log.Printf("Adding firewall exception for IP: %s", ip)
+			
 			// Allow inbound connections from allowed IP
 			inCmd := exec.Command("netsh", "advfirewall", "firewall", "add", "rule", 
-				fmt.Sprintf("name=EDR-Allow-%s-In", ip), "dir=in", "action=allow", fmt.Sprintf("remoteip=%s", ip))
-			_, err := inCmd.CombinedOutput()
-			if err != nil {
-				log.Printf("WARNING: Failed to add inbound rule for %s: %v", ip, err)
+				fmt.Sprintf("name=EDR-Allow-%s-In", ip), "dir=in", "action=allow", 
+				"protocol=any", fmt.Sprintf("remoteip=%s", ip))
+			if output, err := inCmd.CombinedOutput(); err != nil {
+				log.Printf("WARNING: Failed to add inbound rule for %s: %v, output: %s", ip, err, string(output))
+			} else {
+				log.Printf("Successfully added inbound rule for IP: %s", ip)
 			}
 			
 			// Allow outbound connections to allowed IP
 			outCmd := exec.Command("netsh", "advfirewall", "firewall", "add", "rule", 
-				fmt.Sprintf("name=EDR-Allow-%s-Out", ip), "dir=out", "action=allow", fmt.Sprintf("remoteip=%s", ip))
-			_, err = outCmd.CombinedOutput()
-			if err != nil {
-				log.Printf("WARNING: Failed to add outbound rule for %s: %v", ip, err)
+				fmt.Sprintf("name=EDR-Allow-%s-Out", ip), "dir=out", "action=allow", 
+				"protocol=any", fmt.Sprintf("remoteip=%s", ip))
+			if output, err := outCmd.CombinedOutput(); err != nil {
+				log.Printf("WARNING: Failed to add outbound rule for %s: %v, output: %s", ip, err, string(output))
+			} else {
+				log.Printf("Successfully added outbound rule for IP: %s", ip)
 			}
 		}
 	}
 
+	// SECOND: Now block all other traffic (after exceptions are in place)
+	log.Printf("Setting firewall policy to block all traffic except allowed IPs")
+	inboundCmd := exec.Command("netsh", "advfirewall", "set", "allprofiles", "firewallpolicy", "blockinbound,blockoutbound")
+	if output, err := inboundCmd.CombinedOutput(); err != nil {
+		return "", fmt.Errorf("failed to set firewall policy: %v, output: %s", err, string(output))
+	}
+
+	log.Printf("Network isolation activated successfully with %d allowed IPs", len(strings.Split(allowedIPs, ",")))
 	return "Network isolation activated successfully", nil
 }
 
 // handleNetworkRestore restores network connectivity
 func (h *CommandHandler) handleNetworkRestore(params map[string]string) (string, error) {
-	// Use Windows Firewall to restore
-	// Reset firewall settings
-	resetCmd := exec.Command("netsh", "advfirewall", "reset")
-	_, err := resetCmd.CombinedOutput()
-	if err != nil {
-		return "", fmt.Errorf("failed to reset firewall: %v", err)
-	}
+	log.Printf("Restoring network connectivity while preserving IOC blocking rules...")
 	
-	// Reset firewall policy
+	// STEP 1: Reset firewall policy to default (allow outbound, block inbound)
+	log.Printf("Resetting firewall policy to default...")
 	policyCmd := exec.Command("netsh", "advfirewall", "set", "allprofiles", "firewallpolicy", "blockinbound,allowoutbound")
-	_, err = policyCmd.CombinedOutput()
-	if err != nil {
-		return "", fmt.Errorf("failed to set firewall policy: %v", err)
+	if output, err := policyCmd.CombinedOutput(); err != nil {
+		return "", fmt.Errorf("failed to reset firewall policy: %v, output: %s", err, string(output))
 	}
 	
-	// Delete EDR firewall rules
-	deleteRulesCmd := exec.Command("cmd", "/C", "for /f \"tokens=*\" %i in ('netsh advfirewall firewall show rule name^=EDR* ^| findstr \"Rule Name:\"') do netsh advfirewall firewall delete rule name=\"%i\"")
-	_, err = deleteRulesCmd.CombinedOutput()
-	if err != nil {
-		log.Printf("WARNING: Failed to delete EDR firewall rules: %v", err)
+	// STEP 2: Delete only network isolation rules (EDR-Allow-*), keep IOC blocking rules (EDR_Block_*)
+	log.Printf("Removing network isolation firewall rules...")
+	deleteIsolationRulesCmd := exec.Command("cmd", "/C", "for /f \"tokens=*\" %i in ('netsh advfirewall firewall show rule name^=EDR-Allow* ^| findstr \"Rule Name:\"') do netsh advfirewall firewall delete rule name=\"%i\"")
+	if output, err := deleteIsolationRulesCmd.CombinedOutput(); err != nil {
+		log.Printf("WARNING: Failed to delete network isolation rules: %v, output: %s", err, string(output))
+	} else {
+		log.Printf("Successfully removed network isolation rules")
+	}
+	
+	// STEP 3: Verify IOC blocking rules are still intact
+	log.Printf("Verifying IOC blocking rules are preserved...")
+	checkIOCRulesCmd := exec.Command("cmd", "/C", "netsh advfirewall firewall show rule name=EDR_Block* | findstr \"Rule Name:\" | find /c \"Rule Name:\"")
+	if output, err := checkIOCRulesCmd.CombinedOutput(); err != nil {
+		log.Printf("WARNING: Could not verify IOC rules: %v", err)
+	} else {
+		ruleCount := strings.TrimSpace(string(output))
+		log.Printf("IOC blocking rules preserved: %s rules still active", ruleCount)
 	}
 
+	log.Printf("Network connectivity restored successfully, IOC protections maintained")
 	return "Network connectivity restored successfully", nil
 }
