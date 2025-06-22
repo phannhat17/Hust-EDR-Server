@@ -30,7 +30,6 @@ type Scanner struct {
 	config          *config.Config
 	triggerScan     chan struct{}
 	lastScanTime    time.Time // Track when the last scan was performed
-	lastRecordRead  uint32    // Track last Windows Event Log record read for efficient scanning
 }
 
 
@@ -79,10 +78,10 @@ func (s *Scanner) Start() {
 	
 	// Start periodic scans only if interval is positive
 	go func() {
-		// Use default interval of 5 minutes if intervalMinutes is non-positive
+		// Use default interval of 10 minutes if intervalMinutes is non-positive (optimized for low system load)
 		interval := s.intervalMinutes
 		if interval <= 0 {
-			interval = 5
+			interval = 10
 			log.Printf("WARNING: Scanner interval was %d minutes, defaulting to %d minutes", s.intervalMinutes, interval)
 		}
 		
@@ -275,12 +274,12 @@ func (s *Scanner) checkAndBlockNewIPs() {
 
 // scanSysmonLogs scans Windows sysmon logs for file hash matches
 func (s *Scanner) scanSysmonLogs() {
-	log.Printf("Scanning Windows sysmon logs for file hash matches using efficient API method")
+	log.Printf("Scanning Windows sysmon logs for file hash matches")
 	
-	// Use only the efficient API-based scanning, no file export
-	if err := s.scanWindowsSysmonLogsEfficient(); err != nil {
-		log.Printf("Efficient API-based scanning failed: %v", err)
-		log.Printf("File export method has been removed for security and performance reasons")
+	// Use PowerShell approach only (Windows Event Log API doesn't work reliably with Sysmon logs)
+	if err := s.scanSysmonLogsPS(); err != nil {
+		log.Printf("PowerShell scanning failed: %v", err)
+		log.Printf("Unable to scan Sysmon logs - PowerShell Get-WinEvent is the only reliable method for Sysmon log access")
 	}
 }
 
