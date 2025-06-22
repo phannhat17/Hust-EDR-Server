@@ -99,10 +99,10 @@ func (s *Scanner) ProcessSysmonEventPS(event *SysmonEventPS) {
 	// Extract hash information from event message
 	switch event.Id {
 	case 15: // File create stream hash
-		s.processSysmonFileHashEvent(event, "Hash=")
+		s.processSysmonFileHashEvent(event, "Hash:")
 		
 	case 29: // FileExecutableDetected  
-		s.processSysmonFileHashEvent(event, "Hashes=")
+		s.processSysmonFileHashEvent(event, "Hashes:")
 	}
 }
 
@@ -110,13 +110,13 @@ func (s *Scanner) ProcessSysmonEventPS(event *SysmonEventPS) {
 func (s *Scanner) processSysmonFileHashEvent(event *SysmonEventPS, hashPrefix string) {
 	message := event.Message
 	
-	// Extract TargetFilename
+	// Extract TargetFilename first, then Image as fallback
 	targetFilename := s.extractFieldFromMessage(message, "TargetFilename:")
 	if targetFilename == "" {
 		targetFilename = s.extractFieldFromMessage(message, "Image:")
 	}
 	
-	// Extract hash information
+	// Extract hash information - look for the hash prefix
 	hashValue := s.extractFieldFromMessage(message, hashPrefix)
 	
 	if hashValue != "" && targetFilename != "" {
@@ -124,13 +124,22 @@ func (s *Scanner) processSysmonFileHashEvent(event *SysmonEventPS, hashPrefix st
 		s.processHashesData(hashValue, targetFilename)
 	} else {
 		log.Printf("DEBUG: Could not extract hash or filename from Event ID %d", event.Id)
-		log.Printf("DEBUG: Message excerpt: %s", message[:min(200, len(message))])
+		if targetFilename == "" {
+			log.Printf("DEBUG: No TargetFilename or Image found")
+		}
+		if hashValue == "" {
+			log.Printf("DEBUG: No hash found with prefix '%s'", hashPrefix)
+		}
 	}
 }
 
 // extractFieldFromMessage extracts a field value from Sysmon event message
 func (s *Scanner) extractFieldFromMessage(message, fieldPrefix string) string {
-	lines := strings.Split(message, "\n")
+	// Handle both \r\n and \n line endings from PowerShell
+	lines := strings.FieldsFunc(message, func(c rune) bool {
+		return c == '\n' || c == '\r'
+	})
+	
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
 		if strings.HasPrefix(line, fieldPrefix) {
@@ -154,14 +163,15 @@ func (s *Scanner) scanSysmonLogsPS() error {
 	log.Printf("Starting Sysmon log scan using PowerShell Get-WinEvent")
 	
 	// Get events since last scan time - focus on Event ID 15, 29 only
+	// This ensures we only process events between scan intervals to save resources
 	events, err := s.ReadSysmonEventsPS(s.lastScanTime, []int{15, 29})
 	if err != nil {
 		return fmt.Errorf("failed to read Sysmon events: %v", err)
 	}
 	
-	log.Printf("Found %d Sysmon events since %v", len(events), s.lastScanTime)
+	log.Printf("Found %d Sysmon events between %v and now", len(events), s.lastScanTime)
 	
-	// Process each event
+	// Process each event that occurred after our last scan
 	eventsProcessed := 0
 	for _, event := range events {
 		// Parse the time string to compare with lastScanTime
@@ -171,15 +181,17 @@ func (s *Scanner) scanSysmonLogsPS() error {
 			continue
 		}
 		
+		// Only process events that occurred after our last scan (time-based filtering)
 		if eventTime.After(s.lastScanTime) {
+			log.Printf("Processing event from %s (after last scan at %v)", event.TimeCreated, s.lastScanTime)
 			s.ProcessSysmonEventPS(&event)
 			eventsProcessed++
 		}
 	}
 	
-	log.Printf("PowerShell Sysmon scan completed, processed %d events", eventsProcessed)
+	log.Printf("PowerShell Sysmon scan completed, processed %d events from the scan interval", eventsProcessed)
 	
-	// Update last scan time
+	// Update last scan time to current time for next scan
 	s.lastScanTime = time.Now()
 	log.Printf("Updated last scan time to %v for next scan", s.lastScanTime)
 	
